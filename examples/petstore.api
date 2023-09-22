@@ -42,9 +42,9 @@ api "Swagger Petstore" "0.0.1" {
        * A paged array of pets
        */
       @Header(
-        name = x-next
-        schema = string
-        description = A link to the next page of responses
+        name: x-next
+        schema: string
+        description: A link to the next page of responses
       )
       200     => Pets as application/json;
       /**

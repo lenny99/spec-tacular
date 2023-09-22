@@ -1,8 +1,0 @@
-opanapi := schema*
-
-schema := "schema" identifier "{" schemaEntries "}"
-schemaEntries := schemaEntry*
-schemaEntry := key ":" type
-type := "string" / "number" / "Date"
-identifier := '[A-Z_][a-zA-Z0-9_]+'
-key := '[a-z_][a-zA-Z0-9_]+'

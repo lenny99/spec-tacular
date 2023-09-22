@@ -1,6 +1,6 @@
-schema Date = string
+schema Date = string#date
 
-schema Booking {
+schema Booking = {
   container: string
   arrival: Date
 }

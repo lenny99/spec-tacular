@@ -1,0 +1,4 @@
+OpanApi = Schema*
+Schema = "schema" <ident> "=" (TypeRef | ("{" Field* "}"))
+TypeRef = (("[" TypeRef "]") | <ident>) "?"? ("#" <ident>)?
+Field = <ident> ":" TypeRef
