@@ -1,0 +1,23 @@
+ApiScript = {
+  SOI ~ Schema* ~ EOI
+}
+Schema    = {
+  "schema" ~ IDENT ~ "=" ~ SchemaDef
+}
+SchemaDef = { TypeDef | "{" ~ Fields ~ "}" }
+Fields = { (Field ~ "?"?)* }
+TypeDef   = {
+    Primitive ~ "#" ~ Format?
+  | "[" ~ TypeDef ~ "]"
+}
+Format    = { IDENT }
+Field     = { IDENT ~ ":" ~ (IDENT | TypeDef) }
+Primitive = {
+    "string"
+  | "number"
+  | "integer"
+  | "boolean"
+}
+
+IDENT = @{ ASCII_ALPHA ~ ASCII_ALPHANUMERIC* }
+WHITESPACE = _{ " " | NEWLINE }
