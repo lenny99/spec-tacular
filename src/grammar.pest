@@ -10,14 +10,9 @@ TypeDef   = {
     Primitive ~ "#" ~ Format?
   | "[" ~ TypeDef ~ "]"
 }
-Format    = { IDENT }
+Format    = { "date" | "date-time" | "password" | "byte" | "binary" | IDENT }
 Field     = { IDENT ~ ":" ~ (IDENT | TypeDef) }
-Primitive = {
-    "string"
-  | "number"
-  | "integer"
-  | "boolean"
-}
+Primitive = { "string" | "number" | "integer" | "boolean" }
 
 IDENT = @{ ASCII_ALPHA ~ ASCII_ALPHANUMERIC* }
 WHITESPACE = _{ " " | NEWLINE }
