@@ -9,9 +9,10 @@ Fields = { (Field ~ "?"?)* }
 TypeDef   = {
     Primitive ~ "#" ~ Format?
   | "[" ~ TypeDef ~ "]"
+  | IDENT
 }
 Format    = { "date" | "date-time" | "password" | "byte" | "binary" | IDENT }
-Field     = { IDENT ~ ":" ~ (IDENT | TypeDef) }
+Field     = { IDENT ~ ":" ~ TypeDef }
 Primitive = { "string" | "number" | "integer" | "boolean" }
 
 IDENT = @{ ASCII_ALPHA ~ ASCII_ALPHANUMERIC* }

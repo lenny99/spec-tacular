@@ -17,10 +17,14 @@ fn main() -> Result<()> {
 }
 
 mod parser {
-    use std::rc::Rc;
+    use std::{rc::Rc, vec};
 
     use anyhow::Result;
-    use pest::{iterators::Pair, Parser};
+    use itertools::Itertools;
+    use pest::{
+        iterators::{Pair, Pairs},
+        Parser,
+    };
 
     pub fn parse(input: &str) -> Result<ApiScript> {
         let mut parse_tree = ApiScript::parse(Rule::ApiScript, input)?;
@@ -30,6 +34,7 @@ mod parser {
     }
 
     type Node<'a> = Pair<'a, Rule>;
+    type Nodes<'a> = Pairs<'a, Rule>;
 
     #[derive(Parser, Debug)]
     #[grammar = "grammar.pest"]
@@ -64,16 +69,35 @@ mod parser {
         fn schema_definition(schema_definition: Node) -> Result<SchemaDefinition> {
             let inner = schema_definition.into_inner().next().unwrap();
             let schema_definition = match inner.as_rule() {
-                Rule::TypeDef => {
-                    let mut inners = inner.into_inner().into_iter();
-                    let primitive = ApiScript::primitive(inners.next().unwrap());
-                    let format = inners.next().map(ApiScript::format);
-                    SchemaDefinition::NewType { primitive, format }
+                Rule::TypeDef => ApiScript::type_def(inner)?,
+                Rule::Fields => {
+                    let mut inners = inner.into_inner();
+                    let fields = ApiScript::fields(inners)?;
+                    SchemaDefinition::Object { fields: fields }
                 }
-                Rule::Fields => todo!(),
                 _ => unimplemented!(),
             };
             return Ok(schema_definition);
+        }
+
+        fn type_def(node: Node) -> Result<SchemaDefinition> {
+            let mut inners = node.into_inner().into_iter();
+            let primitive = ApiScript::primitive(inners.next().unwrap());
+            let format = inners.next().map(ApiScript::format);
+            Ok(SchemaDefinition::NewType { primitive, format })
+        }
+
+        fn fields(nodes: Nodes) -> Result<Vec<Field>> {
+            let mut fields = Vec::<Field>::new();
+            for node in nodes {
+                for (property, kind) in node.into_inner().tuples() {
+                    fields.push(Field {
+                        name: property.as_str().into(),
+                        definition: ApiScript::type_def(kind)?,
+                    })
+                }
+            }
+            return Ok(fields);
         }
 
         fn format(format: Node) -> Format {
@@ -105,7 +129,7 @@ mod parser {
         pub schema_definition: SchemaDefinition,
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub enum SchemaDefinition {
         NewType {
             primitive: Primitive,
@@ -119,13 +143,13 @@ mod parser {
         },
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub struct Field {
         pub name: String,
         pub definition: SchemaDefinition,
     }
 
-    #[derive(Debug)]
+    #[derive(Debug, Clone)]
     pub enum Primitive {
         String,
         Number,
@@ -145,9 +169,8 @@ mod parser {
 }
 
 mod generator {
-    use crate::parser::{ApiScript, Format, Primitive, Schema, SchemaDefinition};
+    use crate::parser::{ApiScript, Field, Format, Primitive, Schema, SchemaDefinition};
     use indexmap::IndexMap;
-    use openapiv3;
 
     pub(crate) fn generate(api_script: &ApiScript) -> openapiv3::OpenAPI {
         return api_script.generate();
@@ -193,9 +216,49 @@ mod generator {
                     schema_kind: primitive.as_schema_type(format.clone()), // ?
                     schema_data: openapiv3::SchemaData::default(),
                 },
+                SchemaDefinition::Object { fields } => openapiv3::Schema {
+                    schema_data: openapiv3::SchemaData {
+                        ..Default::default()
+                    },
+                    schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::Object(
+                        openapiv3::ObjectType {
+                            properties: into_properties(fields),
+                            ..Default::default()
+                        },
+                    )),
+                },
                 _ => todo!(),
             };
             return (self.identificator.to_owned(), schema);
+        }
+    }
+
+    fn into_properties(
+        fields: &Vec<Field>,
+    ) -> IndexMap<String, openapiv3::ReferenceOr<Box<openapiv3::Schema>>> {
+        let mut map = IndexMap::new();
+        for field in fields {
+            let kind = (&field.definition).into();
+            let schema = openapiv3::Schema {
+                schema_data: Default::default(),
+                schema_kind: kind,
+            };
+            map.insert(
+                field.name.clone(),
+                openapiv3::ReferenceOr::Item(Box::new(schema)),
+            );
+        }
+        return map;
+    }
+
+    impl Into<openapiv3::SchemaKind> for &SchemaDefinition {
+        fn into(self) -> openapiv3::SchemaKind {
+            match self {
+                SchemaDefinition::NewType { primitive, format } => {
+                    primitive.as_schema_type(format.clone())
+                }
+                _ => todo!(),
+            }
         }
     }
 

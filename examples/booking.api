@@ -1,1 +1,6 @@
 schema Date = string#date
+
+schema Booking = {
+  foo: string#date
+  address: string#date
+}
