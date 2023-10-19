@@ -1,6 +1,15 @@
 schema Date = string#date
 
 schema Booking = {
-  foo: string#date
-  address: string#date
+  delivery: string#date
+  address: string
 }
+
+schema ContainerId = string
+
+schema Container = {
+  id: ContainerId
+  tare: integer
+  gross: integer
+}
+
