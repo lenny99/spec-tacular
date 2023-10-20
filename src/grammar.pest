@@ -1,19 +1,32 @@
 ApiScript = {
-  SOI ~ Schema* ~ EOI
+  SOI ~ (Schema | Api)* ~ EOI
 }
-Schema    = {
-  "schema" ~ IDENT ~ "=" ~ SchemaDef
-}
+Schema    = { "schema" ~ IDENT ~ "=" ~ SchemaDef }
 SchemaDef = { TypeDef | "{" ~ Fields ~ "}" }
-Fields = { (Field ~ "?"?)* }
+Fields    = { (Field ~ "?"?)* }
 TypeDef   = {
-    Primitive ~ "#" ~ Format?
-  | "[" ~ TypeDef ~ "]"
-  | IDENT
+  Primitive ~ ("#" ~ Format)?
+| List
+| IDENT
 }
+List      = { "[" ~ TypeDef ~ "]" }
+
 Format    = { "date" | "date-time" | "password" | "byte" | "binary" | IDENT }
 Field     = { IDENT ~ ":" ~ TypeDef }
 Primitive = { "string" | "number" | "integer" | "boolean" }
 
-IDENT = @{ ASCII_ALPHA ~ ASCII_ALPHANUMERIC* }
+Api         =  { "api" ~ IDENT ~ Version ~ "{" ~ PathDef* ~ "}" }
+Version     = @{ "\"" ~ (ASCII_DIGIT | ".")+ ~ "\"" }
+PathDef     =  { "path" ~ Path ~ "{" ~ Endpoint* ~ "}" }
+Path        =  { "\"" ~ PATH ~ "\"" }
+Endpoint    =  { Method ~ OperationId ~ "(" ~ Parameters? ~ ")" ~ "{" ~ Responses ~ "}" }
+Method      =  { "GET" | "PUT" | "POST" | "DELETE" | "PATCH" }
+OperationId =  { IDENT }
+Parameters  =  { "foo" }
+Responses   = _{ Response* }
+Response    =  { HttpCode ~ ":" ~ TypeDef }
+
+HttpCode   = @{ ASCII_DIGIT+ }
+PATH       = @{ (ASCII_ALPHANUMERIC | "/")* }
+IDENT      = @{ ASCII_ALPHA ~ ASCII_ALPHANUMERIC* }
 WHITESPACE = _{ " " | NEWLINE }
