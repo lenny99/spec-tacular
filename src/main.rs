@@ -17,6 +17,7 @@ fn main() -> Result<()> {
 
 mod parser {
     use anyhow::Result;
+    use indexmap::IndexMap;
     use itertools::{Either, Itertools};
     use pest::{
         iterators::{Pair, Pairs},
@@ -50,18 +51,57 @@ mod parser {
     #[grammar = "grammar.pest"]
     pub struct ApiScript {
         pub schemas: Vec<Schema>,
+        pub apis: Vec<Api>,
     }
 
     impl ApiScript {
         fn from(tree: Node) -> Result<Self> {
-            let mut api_script = ApiScript { schemas: vec![] };
+            let mut api_script = ApiScript {
+                schemas: vec![],
+                apis: vec![],
+            };
             for pair in tree.into_inner() {
                 match pair.as_rule() {
                     Rule::Schema => api_script.schemas.push(api_script.schema(pair)?),
+                    Rule::Api => api_script.apis.push(api_script.api(pair)?),
                     _ => (),
                 }
             }
             return Ok(api_script);
+        }
+
+        fn api(&self, api: Node) -> Result<Api> {
+            let mut nodes = api.into_inner();
+            let identifier = nodes.next().unwrap().as_str();
+            let version = nodes.next().unwrap().as_str();
+            let paths = nodes.next().unwrap();
+            // if let Rule::Paths = paths {}
+            todo!()
+        }
+
+        fn endpoint(&self, endpoint: Node) -> Result<Endpoint> {
+            let mut inners = endpoint.into_inner();
+            let identifier = inners.next().unwrap().as_str();
+            let operationId = inners.next().unwrap().as_str();
+
+            let responses_node = inners.next().unwrap();
+            let mut responses = IndexMap::<u16, Response>::new();
+            if let Rule::Responses = responses_node.as_rule() {
+                for response_node in responses_node.into_inner() {
+                    let (http, response) = self.response(response_node)?;
+                    responses.insert(http, response);
+                }
+            }
+
+            return Ok(Endpoint {
+                operation_id: operationId.into(),
+                parameters: vec![],
+                responses: responses,
+            });
+        }
+
+        fn response(&self, response: Node) -> Result<(u16, Response)> {
+            todo!()
         }
 
         fn schema(&self, schema: Node) -> Result<Schema> {
@@ -202,6 +242,38 @@ mod parser {
         Byte,
         Binary,
         Custom(String),
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct Api {
+        name: String,
+        version: String,
+        paths: IndexMap<HttpMethod, Endpoint>,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct Endpoint {
+        operation_id: String,
+        parameters: Vec<Parameter>,
+        responses: IndexMap<u16, Response>,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct Parameter {
+        name: String,
+        kind: SchemaDefinition,
+    }
+
+    #[derive(Debug, Clone)]
+    pub struct Response {}
+
+    #[derive(Debug, Clone)]
+    pub enum HttpMethod {
+        Get,
+        Put,
+        Post,
+        Patch,
+        Delete,
     }
 }
 

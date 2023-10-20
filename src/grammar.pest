@@ -15,15 +15,17 @@ Format    = { "date" | "date-time" | "password" | "byte" | "binary" | IDENT }
 Field     = { IDENT ~ ":" ~ TypeDef }
 Primitive = { "string" | "number" | "integer" | "boolean" }
 
-Api         =  { "api" ~ IDENT ~ Version ~ "{" ~ PathDef* ~ "}" }
+Api         =  { "api" ~ IDENT ~ Version ~ "{" ~ Paths ~ "}" }
+Paths       =  { PathDef* }
 Version     = @{ "\"" ~ (ASCII_DIGIT | ".")+ ~ "\"" }
-PathDef     =  { "path" ~ Path ~ "{" ~ Endpoint* ~ "}" }
+PathDef     =  { "path" ~ Path ~ "{" ~ Endpoints ~ "}" }
+Endpoints   =  { Endpoint* }
 Path        =  { "\"" ~ PATH ~ "\"" }
 Endpoint    =  { Method ~ OperationId ~ "(" ~ Parameters? ~ ")" ~ "{" ~ Responses ~ "}" }
 Method      =  { "GET" | "PUT" | "POST" | "DELETE" | "PATCH" }
-OperationId =  { IDENT }
+OperationId =  _{ IDENT }
 Parameters  =  { "foo" }
-Responses   = _{ Response* }
+Responses   =  { Response* }
 Response    =  { HttpCode ~ ":" ~ TypeDef }
 
 HttpCode   = @{ ASCII_DIGIT+ }
