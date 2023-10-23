@@ -1,6 +1,10 @@
 use anyhow::Result;
-use serde_yaml;
+use clap::Parser;
+use itertools::Itertools;
+use openapiv3::OpenAPI;
+use std::cmp::Ordering;
 use std::fs;
+use std::path::Path;
 
 extern crate pest;
 #[macro_use]
@@ -9,12 +13,78 @@ extern crate pest_derive;
 extern crate derive_getters;
 
 fn main() -> Result<()> {
-    let input = fs::read_to_string("./examples/booking.api")?;
-    let api_script = parser::parse(&input)?;
-    let open_api = generator::generate(&api_script);
-    let open_api_str = serde_yaml::to_string(&open_api)?;
-    println!("{}", open_api_str);
+    let args = cli::Args::parse();
+    match args.command {
+        cli::Commands::Compile { file, output } => {
+            let apis = compile(file.as_path())?;
+            if let Some(output) = output {
+                match apis.len().cmp(&2) {
+                    Ordering::Less | Ordering::Equal => write_to_file(&output, &apis)?,
+                    Ordering::Greater => write_to_files(apis, output)?,
+                }
+            } else {
+                let content = combine_apis(&apis)?;
+                println!("{content}");
+            }
+        }
+    }
     return Ok(());
+}
+
+fn write_to_files(apis: Vec<OpenAPI>, output: std::path::PathBuf) -> Result<(), anyhow::Error> {
+    for api in apis {
+        let ending = format!("/{}", api.info.title);
+        let path = output.join(Path::new(ending.as_str()));
+        std::fs::write(path, serde_yaml::to_string(&api)?)?;
+    }
+    return Ok(());
+}
+
+fn write_to_file(output: &std::path::PathBuf, apis: &Vec<OpenAPI>) -> Result<(), anyhow::Error> {
+    if (output.is_file() || !output.exists()) {
+        let content = combine_apis(apis)?;
+        std::fs::write(output, content)?;
+    }
+    return Ok(());
+}
+
+fn combine_apis(apis: &Vec<OpenAPI>) -> Result<String> {
+    let mut content = String::new();
+    for api in apis {
+        content += "---\n";
+        content += serde_yaml::to_string(api)?.as_str();
+    }
+    return Ok(content);
+}
+
+fn compile(path: &std::path::Path) -> Result<Vec<OpenAPI>> {
+    let input = fs::read_to_string(path)?;
+    let api_script = parser::parse(&input)?;
+    let apis = generator::generate(&api_script);
+    return Ok(apis);
+}
+
+mod cli {
+    use std::path::PathBuf;
+
+    use clap::{Parser, Subcommand};
+    use pest::pratt_parser::Op;
+
+    #[derive(Parser)]
+    #[command(arg_required_else_help(true))]
+    pub struct Args {
+        #[command(subcommand)]
+        pub command: Commands,
+    }
+
+    #[derive(Subcommand, Clone)]
+    pub enum Commands {
+        Compile {
+            file: PathBuf,
+            #[arg(short, long)]
+            output: Option<PathBuf>,
+        },
+    }
 }
 
 mod util;
@@ -103,7 +173,7 @@ mod parser {
             let method: HttpMethod = inners.expect_next_token(Rule::Method)?.into();
             let operation_id = inners.expect_next_token(Rule::Identifier)?.as_str();
 
-            let parameters = inners.expect_next_token(Rule::Parameters)?; // TODO parameters
+            let _parameters = inners.expect_next_token(Rule::Parameters)?; // TODO parameters
 
             let respone_nodes = inners.expect_next_token(Rule::Responses)?;
             let mut responses: IndexMap<u16, Responses> = indexmap!();
@@ -111,8 +181,6 @@ mod parser {
                 let (http, response) = self.response(response_node)?;
                 responses.insert(http, response);
             }
-
-            dbg!(&responses);
 
             return Ok((
                 method,
@@ -186,15 +254,18 @@ mod parser {
             &self,
             node: Node,
         ) -> Result<Either<&Schema, Primitive>> {
-            let schema = self
-                .schemas
-                .iter()
-                .find(|schema| schema.identificator == node.as_str());
+            let schema = self.find_schema(node.as_str());
             if let Some(schema) = schema {
                 return Ok(Either::Left(schema));
             }
             let primitive = ApiScript::primitive(node)?;
             return Ok(Either::Right(primitive));
+        }
+
+        fn find_schema(&self, identificator: &str) -> Option<&Schema> {
+            self.schemas
+                .iter()
+                .find(|schema| schema.identificator == identificator)
         }
 
         fn fields(&self, nodes: Nodes) -> Result<Vec<Field>> {
@@ -334,12 +405,12 @@ mod parser {
 
 mod generator {
     use crate::parser::{
-        Api, ApiScript, Endpoint, Field, Format, HttpMethod, Path, Primitive, Responses, Schema,
+        Api, ApiScript, Endpoint, Field, Format, HttpMethod, Path, Primitive, Schema,
         SchemaDefinition,
     };
     use indexmap::{indexmap, IndexMap};
     use mediatype::MediaTypeBuf;
-    use openapiv3::{Components, Operation, PathItem, ReferenceOr, SchemaKind, StatusCode};
+    use openapiv3::{Components, Operation, PathItem, ReferenceOr, StatusCode};
 
     pub(crate) fn generate(api_script: &ApiScript) -> Vec<openapiv3::OpenAPI> {
         return api_script.generate();

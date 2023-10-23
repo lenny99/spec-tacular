@@ -16,3 +16,4 @@ serde_yaml = "0.9.25"
 itertools = "0.11.0"
 derive-getters = "0.3.0"
 mediatype = "0.19.15"
+clap = { version = "4.4.6", features = ["derive"] }
