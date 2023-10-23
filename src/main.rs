@@ -5,6 +5,8 @@ use std::fs;
 extern crate pest;
 #[macro_use]
 extern crate pest_derive;
+#[macro_use]
+extern crate derive_getters;
 
 fn main() -> Result<()> {
     let input = fs::read_to_string("./examples/booking.api")?;
@@ -15,14 +17,18 @@ fn main() -> Result<()> {
     return Ok(());
 }
 
+mod util;
+
 mod parser {
+    use crate::util::*;
     use anyhow::Result;
-    use indexmap::IndexMap;
+    use indexmap::{indexmap, IndexMap};
     use itertools::{Either, Itertools};
-    use pest::{
-        iterators::{Pair, Pairs},
-        Parser,
+    use mediatype::{
+        names::{APPLICATION, JSON},
+        MediaTypeBuf,
     };
+    use pest::Parser;
     use std::{rc::Rc, vec};
 
     pub fn parse(input: &str) -> Result<ApiScript> {
@@ -31,21 +37,6 @@ mod parser {
         let api_script = ApiScript::from(root)?;
         return Ok(api_script);
     }
-
-    #[derive(Debug)]
-    struct ParseError {
-        message: String,
-    }
-
-    impl std::error::Error for ParseError {}
-    impl std::fmt::Display for ParseError {
-        fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-            f.write_str(&self.message)
-        }
-    }
-
-    type Node<'a> = Pair<'a, Rule>;
-    type Nodes<'a> = Pairs<'a, Rule>;
 
     #[derive(Parser, Debug)]
     #[grammar = "grammar.pest"]
@@ -60,6 +51,7 @@ mod parser {
                 schemas: vec![],
                 apis: vec![],
             };
+
             for pair in tree.into_inner() {
                 match pair.as_rule() {
                     Rule::Schema => api_script.schemas.push(api_script.schema(pair)?),
@@ -74,34 +66,80 @@ mod parser {
             let mut nodes = api.into_inner();
             let identifier = nodes.next().unwrap().as_str();
             let version = nodes.next().unwrap().as_str();
-            let paths = nodes.next().unwrap();
-            // if let Rule::Paths = paths {}
-            todo!()
-        }
+            let path_nodes = nodes.next().unwrap();
 
-        fn endpoint(&self, endpoint: Node) -> Result<Endpoint> {
-            let mut inners = endpoint.into_inner();
-            let identifier = inners.next().unwrap().as_str();
-            let operationId = inners.next().unwrap().as_str();
-
-            let responses_node = inners.next().unwrap();
-            let mut responses = IndexMap::<u16, Response>::new();
-            if let Rule::Responses = responses_node.as_rule() {
-                for response_node in responses_node.into_inner() {
-                    let (http, response) = self.response(response_node)?;
-                    responses.insert(http, response);
-                }
+            let mut paths: IndexMap<String, Path> = indexmap!();
+            for path_node in path_nodes.into_inner() {
+                let (url, path) = self.path(path_node)?;
+                paths.insert(url, path);
             }
 
-            return Ok(Endpoint {
-                operation_id: operationId.into(),
-                parameters: vec![],
-                responses: responses,
+            return Ok(Api {
+                name: identifier.into(),
+                version: version.into(),
+                paths: paths,
             });
         }
 
-        fn response(&self, response: Node) -> Result<(u16, Response)> {
-            todo!()
+        fn path(&self, path: Node) -> Result<(String, Path)> {
+            let mut inners = path.into_inner();
+            let url_path = inners
+                .next()
+                .ok_or(ParseError::new("Expected path"))?
+                .as_str();
+            let endpoint_nodes = inners.next().ok_or(ParseError::new("Expected endpoints"))?;
+
+            let mut endpoints: IndexMap<HttpMethod, Endpoint> = indexmap!();
+            for endpoint_node in endpoint_nodes.into_inner() {
+                let (method, endpoint) = self.endpoint(endpoint_node)?;
+                endpoints.insert(method, endpoint);
+            }
+
+            return Ok((url_path.into(), Path { endpoints }));
+        }
+
+        fn endpoint(&self, endpoint: Node) -> Result<(HttpMethod, Endpoint)> {
+            let mut inners = endpoint.into_inner();
+            let method: HttpMethod = inners.expect_next_token(Rule::Method)?.into();
+            let operation_id = inners.expect_next_token(Rule::Identifier)?.as_str();
+
+            let parameters = inners.expect_next_token(Rule::Parameters)?; // TODO parameters
+
+            let respone_nodes = inners.expect_next_token(Rule::Responses)?;
+            let mut responses: IndexMap<u16, Responses> = indexmap!();
+            for response_node in respone_nodes.into_inner() {
+                let (http, response) = self.response(response_node)?;
+                responses.insert(http, response);
+            }
+
+            dbg!(&responses);
+
+            return Ok((
+                method,
+                Endpoint {
+                    operation_id: operation_id.into(),
+                    parameters: vec![],
+                    responses: responses,
+                },
+            ));
+        }
+
+        fn response(&self, response: Node) -> Result<(HttpCode, Responses)> {
+            assert!(response.as_rule() == Rule::Response);
+            let mut inners = response.into_inner();
+
+            let http_code: u16 = inners
+                .expect_next_token(Rule::HTTP_CODE)?
+                .as_str()
+                .parse()?;
+            let type_def = self.type_def(inners.expect_next_token(Rule::TypeDef)?)?;
+
+            return Ok((
+                http_code,
+                indexmap! {
+                   MediaTypeBuf::new(APPLICATION, JSON) => type_def
+                },
+            ));
         }
 
         fn schema(&self, schema: Node) -> Result<Schema> {
@@ -190,9 +228,7 @@ mod parser {
                 "number" => Ok(Primitive::Number),
                 "integer" => Ok(Primitive::Integer),
                 "boolean" => Ok(Primitive::Boolean),
-                _ => Err(ParseError {
-                    message: format!("{} is not a primitive", primitive.as_str()),
-                }),
+                _ => Err(ParseError::mismatch(Rule::Primitive, primitive.as_str())),
             }
         }
     }
@@ -215,6 +251,7 @@ mod parser {
         Object {
             fields: Vec<Field>,
         },
+        // TODO move into ReferenceOr type like openapiv3
         Reference {
             name: String,
         },
@@ -244,18 +281,23 @@ mod parser {
         Custom(String),
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Getters)]
     pub struct Api {
         name: String,
         version: String,
-        paths: IndexMap<HttpMethod, Endpoint>,
+        paths: IndexMap<String, Path>,
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Getters)]
+    pub struct Path {
+        endpoints: IndexMap<HttpMethod, Endpoint>,
+    }
+
+    #[derive(Debug, Clone, Getters)]
     pub struct Endpoint {
         operation_id: String,
         parameters: Vec<Parameter>,
-        responses: IndexMap<u16, Response>,
+        responses: IndexMap<u16, Responses>,
     }
 
     #[derive(Debug, Clone)]
@@ -264,10 +306,10 @@ mod parser {
         kind: SchemaDefinition,
     }
 
-    #[derive(Debug, Clone)]
-    pub struct Response {}
+    pub type Responses = IndexMap<MediaTypeBuf, SchemaDefinition>;
+    pub type HttpCode = u16;
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Hash, PartialEq, Eq)]
     pub enum HttpMethod {
         Get,
         Put,
@@ -275,46 +317,152 @@ mod parser {
         Patch,
         Delete,
     }
+
+    impl<'a> Into<HttpMethod> for Node<'a> {
+        fn into(self) -> HttpMethod {
+            match self.as_str() {
+                "GET" => HttpMethod::Get,
+                "PUT" => HttpMethod::Put,
+                "POST" => HttpMethod::Post,
+                "DELETE" => HttpMethod::Delete,
+                "PATCH" => HttpMethod::Patch,
+                &_ => unreachable!(),
+            }
+        }
+    }
 }
 
 mod generator {
-    use crate::parser::{ApiScript, Field, Format, Primitive, Schema, SchemaDefinition};
-    use indexmap::IndexMap;
-    use openapiv3::ReferenceOr;
+    use crate::parser::{
+        Api, ApiScript, Endpoint, Field, Format, HttpMethod, Path, Primitive, Responses, Schema,
+        SchemaDefinition,
+    };
+    use indexmap::{indexmap, IndexMap};
+    use mediatype::MediaTypeBuf;
+    use openapiv3::{Components, Operation, PathItem, ReferenceOr, StatusCode};
 
-    pub(crate) fn generate(api_script: &ApiScript) -> openapiv3::OpenAPI {
+    pub(crate) fn generate(api_script: &ApiScript) -> Vec<openapiv3::OpenAPI> {
         return api_script.generate();
     }
 
-    trait Generate<T> {
-        fn generate(&self) -> T;
+    impl ApiScript {
+        fn generate(&self) -> Vec<openapiv3::OpenAPI> {
+            let mut apis: Vec<openapiv3::OpenAPI> = vec![];
+            for api in self.apis.iter() {
+                let open_api = api.generate(&self);
+                apis.push(open_api);
+            }
+            return apis;
+        }
+
+        fn generate_schemas(&self) -> IndexMap<String, ReferenceOr<openapiv3::Schema>> {
+            return self.schemas.iter().map(Schema::generate).fold(
+                IndexMap::new(),
+                |mut map, (identificator, schema)| {
+                    map.insert(identificator, openapiv3::ReferenceOr::Item(schema));
+                    return map;
+                },
+            );
+        }
     }
 
-    impl Generate<openapiv3::OpenAPI> for ApiScript {
-        fn generate(&self) -> openapiv3::OpenAPI {
+    impl Api {
+        fn generate(&self, api: &ApiScript) -> openapiv3::OpenAPI {
             return openapiv3::OpenAPI {
-                components: Some(openapiv3::Components {
-                    schemas: self.schemas.iter().map(Schema::generate).fold(
-                        IndexMap::new(),
-                        |mut map, (identificator, schema)| {
-                            map.insert(identificator, openapiv3::ReferenceOr::Item(schema));
-                            return map;
-                        },
-                    ),
+                paths: self.generate_paths(),
+                components: Option::Some(Components {
+                    schemas: api.generate_schemas(),
                     ..Default::default()
                 }),
-                openapi: String::from("3.1.0"),
-                info: openapiv3::Info {
+                ..Default::default()
+            };
+        }
+
+        fn generate_paths(&self) -> openapiv3::Paths {
+            let mut paths: IndexMap<String, ReferenceOr<PathItem>> = indexmap!();
+            for (url, path) in self.paths().iter() {
+                let path = path.generate();
+                paths.insert(url.into(), ReferenceOr::Item(path));
+            }
+
+            return openapiv3::Paths {
+                paths: paths,
+                extensions: indexmap!(),
+            };
+        }
+    }
+
+    impl Path {
+        fn generate(&self) -> openapiv3::PathItem {
+            let get = self
+                .endpoints()
+                .get(&HttpMethod::Get)
+                .map(Endpoint::generate);
+
+            return PathItem {
+                get: get,
+                ..Default::default()
+            };
+        }
+    }
+
+    impl Endpoint {
+        fn generate(&self) -> Operation {
+            return Operation {
+                operation_id: Option::Some(self.operation_id().into()),
+                responses: self.into(),
+                ..Default::default()
+            };
+        }
+
+        fn openapi_responses(&self) -> openapiv3::Responses {
+            let mut responses = indexmap!();
+            for (http_code, media_responses) in self.responses() {
+                let response = openapiv3::Response {
+                    content: Endpoint::to_content(media_responses),
                     ..Default::default()
-                },
-                servers: vec![],
-                paths: openapiv3::Paths {
+                };
+                responses.insert(StatusCode::Code(*http_code), ReferenceOr::Item(response));
+            }
+
+            return openapiv3::Responses {
+                responses,
+                ..Default::default()
+            };
+        }
+
+        fn to_content(
+            map: &IndexMap<MediaTypeBuf, SchemaDefinition>,
+        ) -> IndexMap<String, openapiv3::MediaType> {
+            let mut result = indexmap!();
+            for (media_type, definition) in map {
+                let schema = definition.into();
+                result.insert(
+                    media_type.to_string(),
+                    openapiv3::MediaType {
+                        schema: Option::Some(ReferenceOr::Item(schema)),
+                        ..Default::default()
+                    },
+                );
+            }
+            return result;
+        }
+    }
+
+    impl Into<openapiv3::Responses> for Endpoint {
+        fn into(self) -> openapiv3::Responses {
+            let mut responses = indexmap!();
+            for (http_code, media_responses) in self.responses() {
+                let response = openapiv3::Response {
+                    content: Endpoint::to_content(media_responses),
                     ..Default::default()
-                },
-                security: None,
-                tags: vec![],
-                external_docs: None,
-                extensions: IndexMap::new(),
+                };
+                responses.insert(StatusCode::Code(*http_code), ReferenceOr::Item(response));
+            }
+
+            return openapiv3::Responses {
+                responses,
+                ..Default::default()
             };
         }
     }

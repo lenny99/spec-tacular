@@ -13,15 +13,15 @@ schema Container = {
   gross: integer
 }
 
-Problem = {
+schema Problem = {
   description: string
 }
 
 api ContainerApi "0.0.1" {
   path "/containers" {
-    GET listContainers(@Query @Max(100) limit?: Int64) {
-      200 => Container
-      401 => Problem
+    GET listContainers(@Query @Max() limit: integer) {
+      200: Container
+      401: Problem
     }
   }
 }
