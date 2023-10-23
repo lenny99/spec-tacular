@@ -339,7 +339,7 @@ mod generator {
     };
     use indexmap::{indexmap, IndexMap};
     use mediatype::MediaTypeBuf;
-    use openapiv3::{Components, Operation, PathItem, ReferenceOr, StatusCode};
+    use openapiv3::{Components, Operation, PathItem, ReferenceOr, SchemaKind, StatusCode};
 
     pub(crate) fn generate(api_script: &ApiScript) -> Vec<openapiv3::OpenAPI> {
         return api_script.generate();
@@ -410,7 +410,7 @@ mod generator {
         fn generate(&self) -> Operation {
             return Operation {
                 operation_id: Option::Some(self.operation_id().into()),
-                responses: self.into(),
+                responses: self.openapi_responses(),
                 ..Default::default()
             };
         }
@@ -436,11 +436,11 @@ mod generator {
         ) -> IndexMap<String, openapiv3::MediaType> {
             let mut result = indexmap!();
             for (media_type, definition) in map {
-                let schema = definition.into();
+                let reference_or_schema = definition.into();
                 result.insert(
                     media_type.to_string(),
                     openapiv3::MediaType {
-                        schema: Option::Some(ReferenceOr::Item(schema)),
+                        schema: Option::Some(reference_or_schema),
                         ..Default::default()
                     },
                 );
@@ -469,24 +469,7 @@ mod generator {
 
     impl Schema {
         fn generate(&self) -> (String, openapiv3::Schema) {
-            let schema = match &self.schema_definition {
-                SchemaDefinition::NewType { primitive, format } => openapiv3::Schema {
-                    schema_kind: primitive.as_schema_type(format.clone()), // ?
-                    schema_data: openapiv3::SchemaData::default(),
-                },
-                SchemaDefinition::Object { fields } => openapiv3::Schema {
-                    schema_data: openapiv3::SchemaData {
-                        ..Default::default()
-                    },
-                    schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::Object(
-                        openapiv3::ObjectType {
-                            properties: into_properties(fields),
-                            ..Default::default()
-                        },
-                    )),
-                },
-                _ => todo!(),
-            };
+            let schema = (&self.schema_definition).into();
             return (self.identificator.to_owned(), schema);
         }
     }
@@ -515,6 +498,33 @@ mod generator {
 
     type ReferenceOrSchemaKind = openapiv3::ReferenceOr<openapiv3::SchemaKind>;
 
+    impl Into<openapiv3::Schema> for &SchemaDefinition {
+        fn into(self) -> openapiv3::Schema {
+            match &self {
+                SchemaDefinition::NewType { primitive, format } => {
+                    return openapiv3::Schema {
+                        schema_kind: primitive.as_schema_type(format.clone()), // ?
+                        schema_data: openapiv3::SchemaData::default(),
+                    };
+                }
+                SchemaDefinition::Object { fields } => {
+                    return openapiv3::Schema {
+                        schema_data: openapiv3::SchemaData {
+                            ..Default::default()
+                        },
+                        schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::Object(
+                            openapiv3::ObjectType {
+                                properties: into_properties(fields),
+                                ..Default::default()
+                            },
+                        )),
+                    }
+                }
+                _ => todo!(),
+            };
+        }
+    }
+
     impl Into<ReferenceOrSchemaKind> for &SchemaDefinition {
         fn into(self) -> ReferenceOrSchemaKind {
             match self {
@@ -528,6 +538,19 @@ mod generator {
                 }
                 _ => todo!(),
             }
+        }
+    }
+
+    impl Into<ReferenceOr<openapiv3::Schema>> for &SchemaDefinition {
+        fn into(self) -> ReferenceOr<openapiv3::Schema> {
+            if let SchemaDefinition::Reference { name } = self {
+                return ReferenceOr::Reference {
+                    reference: format!("#/components/schemas/{name}"),
+                };
+            }
+
+            let schema = self.into();
+            return ReferenceOr::Item(schema);
         }
     }
 
