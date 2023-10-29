@@ -99,7 +99,7 @@ mod parser {
         MediaTypeBuf,
     };
     use pest::Parser;
-    use std::{rc::Rc, vec};
+    use std::{ptr::null, rc::Rc, vec};
 
     pub fn parse(input: &str) -> Result<ApiScript> {
         let mut parse_tree = ApiScript::parse(Rule::ApiScript, input)?;
@@ -271,11 +271,14 @@ mod parser {
         fn fields(&self, nodes: Nodes) -> Result<Vec<Field>> {
             let mut fields = Vec::<Field>::new();
             for node in nodes {
-                for (property, kind) in node.into_inner().tuples() {
-                    fields.push(Field {
-                        name: property.as_str().into(),
-                        definition: self.type_def(kind)?,
-                    })
+                let inners = node.into_inner();
+                let required = inners.len() == 2;
+                for (property, kind) in inners.tuples() {
+                    fields.push(Field::new(
+                        property.as_str().into(),
+                        self.type_def(kind)?,
+                        required,
+                    ));
                 }
             }
             return Ok(fields);
@@ -328,10 +331,21 @@ mod parser {
         },
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Getters)]
     pub struct Field {
-        pub name: String,
-        pub definition: SchemaDefinition,
+        name: String,
+        definition: SchemaDefinition,
+        required: bool,
+    }
+
+    impl Field {
+        fn new(name: String, definition: SchemaDefinition, required: bool) -> Self {
+            Field {
+                name,
+                definition,
+                required,
+            }
+        }
     }
 
     #[derive(Debug, Clone)]
@@ -545,28 +559,6 @@ mod generator {
         }
     }
 
-    fn into_properties(
-        fields: &Vec<Field>,
-    ) -> IndexMap<String, openapiv3::ReferenceOr<Box<openapiv3::Schema>>> {
-        let mut map = IndexMap::new();
-        for field in fields {
-            let kind: ReferenceOrSchemaKind = (&field.definition).into();
-            match kind {
-                ReferenceOr::Item(kind) => {
-                    let schema = openapiv3::Schema {
-                        schema_data: Default::default(),
-                        schema_kind: kind,
-                    };
-                    map.insert(field.name.clone(), ReferenceOr::Item(Box::new(schema)));
-                }
-                ReferenceOr::Reference { reference } => {
-                    map.insert(field.name.clone(), ReferenceOr::Reference { reference });
-                }
-            }
-        }
-        return map;
-    }
-
     type ReferenceOrSchemaKind = openapiv3::ReferenceOr<openapiv3::SchemaKind>;
 
     impl Into<openapiv3::Schema> for &SchemaDefinition {
@@ -585,7 +577,8 @@ mod generator {
                         },
                         schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::Object(
                             openapiv3::ObjectType {
-                                properties: into_properties(fields),
+                                properties: SchemaDefinition::properties(fields),
+                                required: SchemaDefinition::required_properties(fields),
                                 ..Default::default()
                             },
                         )),
@@ -593,6 +586,38 @@ mod generator {
                 }
                 _ => todo!(),
             };
+        }
+    }
+
+    impl SchemaDefinition {
+        fn properties(
+            fields: &Vec<Field>,
+        ) -> IndexMap<String, openapiv3::ReferenceOr<Box<openapiv3::Schema>>> {
+            let mut map = IndexMap::new();
+            for field in fields {
+                let kind: ReferenceOrSchemaKind = field.definition().into();
+                match kind {
+                    ReferenceOr::Item(kind) => {
+                        let schema = openapiv3::Schema {
+                            schema_data: Default::default(),
+                            schema_kind: kind,
+                        };
+                        map.insert(field.name().clone(), ReferenceOr::Item(Box::new(schema)));
+                    }
+                    ReferenceOr::Reference { reference } => {
+                        map.insert(field.name().clone(), ReferenceOr::Reference { reference });
+                    }
+                }
+            }
+            return map;
+        }
+
+        fn required_properties(feilds: &Vec<Field>) -> Vec<String> {
+            feilds
+                .iter()
+                .filter(|f| *f.required())
+                .map(|f| f.name().clone())
+                .collect()
         }
     }
 

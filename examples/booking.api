@@ -9,8 +9,8 @@ schema ContainerId = string
 
 schema Container = {
   id: ContainerId
-  tare: integer
-  gross: integer
+  tare: integer?
+  gross: integer?
 }
 
 schema Problem = {

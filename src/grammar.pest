@@ -2,7 +2,8 @@
 ApiScript = { SOI ~ (Schema | Api)* ~ EOI }
 Schema    = { "schema" ~ Identifier ~ "=" ~ SchemaDef }
 SchemaDef = { TypeDef | "{" ~ Fields ~ "}" }
-Fields    = { (Field ~ "?"?)* }
+Fields    = { Field* }
+Optional  = { "?" }
 TypeDef   = {
   Primitive ~ ("#" ~ Format)?
 | List
@@ -12,7 +13,7 @@ List       = { "[" ~ TypeDef ~ "]" }
 Identifier = @{ ASCII_ALPHA ~ ASCII_ALPHANUMERIC* }
 
 Format    = { "date" | "date-time" | "password" | "byte" | "binary" | Identifier }
-Field     = { Identifier ~ ":" ~ TypeDef }
+Field     = { Identifier ~ ":" ~ TypeDef ~ Optional? }
 Primitive = { "string" | "number" | "integer" | "boolean" }
 
 Api         =  { "api" ~ Identifier ~ Version ~ "{" ~ Paths ~ "}" }
