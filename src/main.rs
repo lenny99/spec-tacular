@@ -1,6 +1,5 @@
 use anyhow::Result;
 use clap::Parser;
-use itertools::Itertools;
 use openapiv3::OpenAPI;
 use std::cmp::Ordering;
 use std::fs;
@@ -41,7 +40,7 @@ fn write_to_files(apis: Vec<OpenAPI>, output: std::path::PathBuf) -> Result<(), 
 }
 
 fn write_to_file(output: &std::path::PathBuf, apis: &Vec<OpenAPI>) -> Result<(), anyhow::Error> {
-    if (output.is_file() || !output.exists()) {
+    if output.is_file() || !output.exists() {
         let content = combine_apis(apis)?;
         std::fs::write(output, content)?;
     }
@@ -65,10 +64,8 @@ fn compile(path: &std::path::Path) -> Result<Vec<OpenAPI>> {
 }
 
 mod cli {
-    use std::path::PathBuf;
-
     use clap::{Parser, Subcommand};
-    use pest::pratt_parser::Op;
+    use std::path::PathBuf;
 
     #[derive(Parser)]
     #[command(arg_required_else_help(true))]
@@ -91,15 +88,15 @@ mod util;
 
 mod parser {
     use crate::util::*;
-    use anyhow::Result;
+    use anyhow::{bail, Result};
     use indexmap::{indexmap, IndexMap};
-    use itertools::{Either, Itertools};
+    use itertools::Itertools;
     use mediatype::{
         names::{APPLICATION, JSON},
         MediaTypeBuf,
     };
     use pest::Parser;
-    use std::{ptr::null, rc::Rc, vec};
+    use std::{rc::Rc, vec};
 
     pub fn parse(input: &str) -> Result<ApiScript> {
         let mut parse_tree = ApiScript::parse(Rule::ApiScript, input)?;
@@ -237,35 +234,52 @@ mod parser {
         fn type_def(&self, node: Node) -> Result<SchemaDefinition> {
             let mut inners = node.into_inner().into_iter();
             let name = inners.next().unwrap();
-            let schema_or_primitve = self.find_schema_or_parse_as_primitve(name)?;
-            let definition = match schema_or_primitve {
-                Either::Left(schema) => SchemaDefinition::Reference {
-                    name: schema.identificator.clone(),
-                },
-                Either::Right(primitive) => {
-                    let format = inners.next().map(ApiScript::format);
-                    SchemaDefinition::NewType { primitive, format }
-                }
-            };
-            return Ok(definition);
+            let schema = self.parse_type(name)?;
+            return Ok(schema);
         }
 
-        fn find_schema_or_parse_as_primitve(
-            &self,
-            node: Node,
-        ) -> Result<Either<&Schema, Primitive>> {
-            let schema = self.find_schema(node.as_str());
-            if let Some(schema) = schema {
-                return Ok(Either::Left(schema));
+        fn parse_type(&self, node: Node) -> Result<SchemaDefinition> {
+            if let Rule::TypeDef = node.as_rule() {
+                return self.type_def(node);
             }
-            let primitive = ApiScript::primitive(node)?;
-            return Ok(Either::Right(primitive));
+            if let Rule::List = node.as_rule() {
+                // TODO allow declaring types in lists?
+                let name = node
+                    .into_inner()
+                    .expect_next_token(Rule::TypeDef)?
+                    .into_inner()
+                    .expect_next_token(Rule::Identifier)?;
+                let ident: &str = &self.find_schema(name.as_str())?.identificator;
+                let reference = SchemaDefinition::Reference { name: ident.into() };
+                return Ok(SchemaDefinition::Array {
+                    schema: Rc::new(reference),
+                });
+            }
+            if let Rule::Identifier = node.as_rule() {
+                let schema = self.find_schema(node.as_str())?;
+                return Ok(schema.into());
+            }
+            if let Rule::Primitive = node.as_rule() {
+                let primitive = ApiScript::primitive(node)?;
+
+                return Ok(SchemaDefinition::NewType {
+                    primitive: primitive,
+                    format: None,
+                });
+            }
+
+            bail!("Could not determine type")
         }
 
-        fn find_schema(&self, identificator: &str) -> Option<&Schema> {
-            self.schemas
+        fn find_schema(&self, identificator: &str) -> Result<&Schema> {
+            let schema = self
+                .schemas
                 .iter()
-                .find(|schema| schema.identificator == identificator)
+                .find(|schema| schema.identificator == identificator);
+            if schema.is_none() {
+                bail!("{identificator} is not a kown type");
+            }
+            return Ok(schema.unwrap());
         }
 
         fn fields(&self, nodes: Nodes) -> Result<Vec<Field>> {
@@ -296,13 +310,13 @@ mod parser {
             }
         }
 
-        fn primitive(primitive: Node) -> Result<Primitive, ParseError> {
+        fn primitive(primitive: Node) -> Result<Primitive> {
             match primitive.as_str() {
                 "string" => Ok(Primitive::String),
                 "number" => Ok(Primitive::Number),
                 "integer" => Ok(Primitive::Integer),
                 "boolean" => Ok(Primitive::Boolean),
-                _ => Err(ParseError::mismatch(Rule::Primitive, primitive.as_str())),
+                _ => bail!("{primitive} was not a Primitive"),
             }
         }
     }
@@ -313,6 +327,14 @@ mod parser {
         pub schema_definition: SchemaDefinition,
     }
 
+    impl Into<SchemaDefinition> for &Schema {
+        fn into(self) -> SchemaDefinition {
+            return SchemaDefinition::Reference {
+                name: self.identificator.clone(),
+            };
+        }
+    }
+
     #[derive(Debug, Clone)]
     pub enum SchemaDefinition {
         NewType {
@@ -320,7 +342,7 @@ mod parser {
             format: Option<Format>,
         },
         Array {
-            schema_ref: Rc<Schema>,
+            schema: Rc<SchemaDefinition>,
         },
         Object {
             fields: Vec<Field>,
@@ -422,6 +444,7 @@ mod generator {
         Api, ApiScript, Endpoint, Field, Format, HttpMethod, Path, Primitive, Schema,
         SchemaDefinition,
     };
+    use anyhow::bail;
     use indexmap::{indexmap, IndexMap};
     use mediatype::MediaTypeBuf;
     use openapiv3::{Components, Operation, PathItem, ReferenceOr, StatusCode};
@@ -631,6 +654,22 @@ mod generator {
                 SchemaDefinition::Reference { name } => {
                     let path = format!("#/components/schemas/{}", name);
                     return ReferenceOrSchemaKind::Reference { reference: path };
+                }
+                SchemaDefinition::Array { schema } => {
+                    if let SchemaDefinition::Reference { name } = schema.as_ref() {
+                        let path = format!("#/components/schemas/{name}");
+                        let reference = ReferenceOr::<Box<openapiv3::Schema>>::Reference { reference: path };
+                        let array_type = openapiv3::ArrayType {
+                            items: Option::Some(reference),
+                            max_items: None,
+                            min_items: None,
+                            unique_items: false
+                        };
+                        let schema_kind = openapiv3::Type::Array(array_type);
+                        let schema_type = openapiv3::SchemaKind::Type(schema_kind);
+                        return ReferenceOrSchemaKind::Item(schema_type);
+                    }
+                    return ReferenceOrSchemaKind::Reference { reference: String::from("FOO") }
                 }
                 _ => todo!(),
             }

@@ -33,6 +33,6 @@ Responses   =  { Response* }
 Response    =  { HTTP_CODE ~ ":" ~ TypeDef }
 
 HTTP_CODE  = @{ ASCII_DIGIT+ }
-PATH       = @{ (ASCII_ALPHANUMERIC | "/")* }
+PATH       = @{ (ASCII_ALPHANUMERIC | "/" | "{" | "}")* }
 VERSION    = @{ (ASCII_DIGIT | ".")+ }
 WHITESPACE = _{ " " | NEWLINE }

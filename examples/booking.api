@@ -1,16 +1,17 @@
 schema Date = string#date
 
-schema Booking = {
-  delivery: string#date
-  address: string
-}
-
 schema ContainerId = string
 
 schema Container = {
   id: ContainerId
   tare: integer?
   gross: integer?
+}
+
+schema Booking = {
+  delivery: string#date
+  address: string
+  containers: [Container]
 }
 
 schema Problem = {
@@ -21,6 +22,12 @@ api ContainerApi "0.0.1" {
   path "/containers" {
     GET listContainers(@Query @Max() limit: integer) {
       200: Container
+      401: Problem
+    }
+  }
+  path "/booking/{id}" {
+    GET getBooking(@Url id: string) {
+      200: Booking
       401: Problem
     }
   }
