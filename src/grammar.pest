@@ -25,10 +25,10 @@ UrlPath     =  { PATH }
 Endpoint    =  { Method ~ OperationId ~ "(" ~ Parameters? ~ ")" ~ "{" ~ Responses ~ "}" }
 Method      =  { "GET" | "PUT" | "POST" | "DELETE" | "PATCH" }
 OperationId = _{ Identifier }
-Parameters  =  { Annotations ~ Parameter ~ ("," ~ Parameter)* }
+Parameters  =  { Parameter ~ ("," ~ Parameter)* }
 Annotations =  { Annotation* }
-Annotation  = @{ "@" ~ Identifier ~ ("(" ~ ")")? }
-Parameter   =  { Identifier ~ ":" ~ TypeDef }
+Annotation  =  { "@" ~ Identifier ~ ("(" ~ ")")? }
+Parameter   =  { Annotations ~ Identifier ~ ":" ~ TypeDef }
 Responses   =  { Response* }
 Response    =  { HTTP_CODE ~ ":" ~ TypeDef }
 

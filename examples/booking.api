@@ -26,7 +26,7 @@ api ContainerApi "0.0.1" {
     }
   }
   path "/booking/{id}" {
-    GET getBooking(@Url id: string) {
+    GET getBooking(@Path id: string) {
       200: Booking
       401: Problem
     }

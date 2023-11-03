@@ -170,7 +170,11 @@ mod parser {
             let method: HttpMethod = inners.expect_next_token(Rule::Method)?.into();
             let operation_id = inners.expect_next_token(Rule::Identifier)?.as_str();
 
-            let _parameters = inners.expect_next_token(Rule::Parameters)?; // TODO parameters
+            let parameter_node = inners.expect_next_token(Rule::Parameters)?; // TODO parameters
+            let mut parameters = vec![];
+            for node in parameter_node.into_inner() {
+                parameters.push(self.parameter(node)?);
+            }
 
             let respone_nodes = inners.expect_next_token(Rule::Responses)?;
             let mut responses: IndexMap<u16, Responses> = indexmap!();
@@ -183,10 +187,40 @@ mod parser {
                 method,
                 Endpoint {
                     operation_id: operation_id.into(),
-                    parameters: vec![],
-                    responses: responses,
+                    parameters,
+                    responses,
                 },
             ));
+        }
+
+        fn parameter(&self, parameter: Node) -> Result<Parameter> {
+            let mut iter = parameter.into_inner();
+            let annotations = Self::process(iter.expect_next_token(Rule::Annotations)?)?;
+            let identifier = iter.expect_next_token(Rule::Identifier)?;
+            let type_def = iter.expect_next_token(Rule::TypeDef)?;
+            return Ok(Parameter {
+                name: identifier.as_str().to_string(),
+                parameter_type: annotations.parameter_type,
+                kind: self.type_def(type_def)?,
+            });
+        }
+
+        fn process(annotations: Node) -> Result<ParameterResult, ParseError> {
+            let mut parameter_type = None;
+
+            for annotation in annotations.into_inner() {
+                let mut tokens = annotation.into_inner();
+                let identifier = tokens.expect_next_token(Rule::Identifier)?;
+                match identifier.as_str() {
+                    "Path" => parameter_type = Some(ParameterType::Path),
+                    "Query" => parameter_type = Some(ParameterType::Query),
+                    _ => (),
+                }
+            }
+
+            return Ok(ParameterResult {
+                parameter_type: parameter_type.unwrap_or(ParameterType::Query),
+            });
         }
 
         fn response(&self, response: Node) -> Result<(HttpCode, Responses)> {
@@ -321,6 +355,10 @@ mod parser {
         }
     }
 
+    struct ParameterResult {
+        parameter_type: ParameterType,
+    }
+
     #[derive(Debug)]
     pub struct Schema {
         pub identificator: String,
@@ -407,10 +445,19 @@ mod parser {
         responses: IndexMap<u16, Responses>,
     }
 
-    #[derive(Debug, Clone)]
+    #[derive(Debug, Clone, Getters)]
     pub struct Parameter {
         name: String,
+        parameter_type: ParameterType,
         kind: SchemaDefinition,
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum ParameterType {
+        Query,
+        Path,
+        Header,
+        Cookie,
     }
 
     pub type Responses = IndexMap<MediaTypeBuf, SchemaDefinition>;
@@ -441,8 +488,8 @@ mod parser {
 
 mod generator {
     use crate::parser::{
-        Api, ApiScript, Endpoint, Field, Format, HttpMethod, Path, Primitive, Schema,
-        SchemaDefinition,
+        Api, ApiScript, Endpoint, Field, Format, HttpMethod, ParameterType, Path, Primitive,
+        Schema, SchemaDefinition,
     };
     use anyhow::bail;
     use indexmap::{indexmap, IndexMap};
@@ -518,9 +565,54 @@ mod generator {
         fn generate(&self) -> Operation {
             return Operation {
                 operation_id: Option::Some(self.operation_id().into()),
+                parameters: self.openapi_parameters(),
                 responses: self.openapi_responses(),
                 ..Default::default()
             };
+        }
+
+        fn openapi_parameters(&self) -> Vec<ReferenceOr<openapiv3::Parameter>> {
+            let mut result = vec![];
+
+            for parameter in self.parameters() {
+                let parameter = match parameter.parameter_type() {
+                    ParameterType::Query => openapiv3::Parameter::Query {
+                        parameter_data: openapiv3::ParameterData {
+                            name: parameter.name().to_string(),
+                            required: false,
+                            format: parameter.kind().into(),
+                            example: None,
+                            examples: indexmap! {},
+                            explode: None,
+                            extensions: indexmap! {},
+                            description: None,
+                            deprecated: None,
+                        },
+                        allow_reserved: false,
+                        style: openapiv3::QueryStyle::Form,
+                        allow_empty_value: None,
+                    },
+                    ParameterType::Path => openapiv3::Parameter::Path {
+                        parameter_data: openapiv3::ParameterData {
+                            name: parameter.name().to_string(),
+                            description: None,
+                            required: true,
+                            deprecated: None,
+                            format: parameter.kind().into(),
+                            example: None,
+                            examples: indexmap! {},
+                            explode: None,
+                            extensions: indexmap! {},
+                        },
+                        style: openapiv3::PathStyle::Simple,
+                    },
+                    ParameterType::Header => todo!(),
+                    ParameterType::Cookie => todo!(),
+                };
+                result.push(ReferenceOr::Item(parameter));
+            }
+
+            return result;
         }
 
         fn openapi_responses(&self) -> openapiv3::Responses {
@@ -554,6 +646,13 @@ mod generator {
                 );
             }
             return result;
+        }
+    }
+
+    impl Into<openapiv3::ParameterSchemaOrContent> for &SchemaDefinition {
+        fn into(self) -> openapiv3::ParameterSchemaOrContent {
+            let schema = openapiv3::ReferenceOr::Item(self.into());
+            return openapiv3::ParameterSchemaOrContent::Schema(schema);
         }
     }
 
@@ -658,18 +757,21 @@ mod generator {
                 SchemaDefinition::Array { schema } => {
                     if let SchemaDefinition::Reference { name } = schema.as_ref() {
                         let path = format!("#/components/schemas/{name}");
-                        let reference = ReferenceOr::<Box<openapiv3::Schema>>::Reference { reference: path };
+                        let reference =
+                            ReferenceOr::<Box<openapiv3::Schema>>::Reference { reference: path };
                         let array_type = openapiv3::ArrayType {
                             items: Option::Some(reference),
                             max_items: None,
                             min_items: None,
-                            unique_items: false
+                            unique_items: false,
                         };
                         let schema_kind = openapiv3::Type::Array(array_type);
                         let schema_type = openapiv3::SchemaKind::Type(schema_kind);
                         return ReferenceOrSchemaKind::Item(schema_type);
                     }
-                    return ReferenceOrSchemaKind::Reference { reference: String::from("FOO") }
+                    return ReferenceOrSchemaKind::Reference {
+                        reference: String::from("FOO"),
+                    };
                 }
                 _ => todo!(),
             }

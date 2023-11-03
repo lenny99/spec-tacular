@@ -27,7 +27,7 @@ impl<'i> ExpectToken<'i> for Option<Node<'i>> {
     fn expect_token(self, expected: Rule) -> Result<Node<'i>, ParseError> {
         return self
             .map(|node| node.expect_token(expected))
-            .ok_or(ParseError::nothing())?;
+            .ok_or(ParseError::none(expected))?;
     }
 }
 
@@ -59,9 +59,9 @@ impl ParseError {
         }
     }
 
-    pub fn nothing() -> ParseError {
+    pub fn none(expected: Rule) -> ParseError {
         Self {
-            message: String::from("Expected token but found none"),
+            message: format!("Expected {expected} but found none"),
         }
     }
 
