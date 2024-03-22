@@ -123,10 +123,21 @@ mod parser {
                 match pair.as_rule() {
                     Rule::Schema => api_script.schemas.push(api_script.schema(pair)?),
                     Rule::Api => api_script.apis.push(api_script.api(pair)?),
+                    Rule::Type => api_script.schemas.push(api_script.kind(pair)?),
                     _ => (),
                 }
             }
             return Ok(api_script);
+        }
+
+        fn kind(&self, kind: Node) -> Result<Schema> {
+            let mut nodes = kind.into_inner();
+            let identifier = nodes.next().unwrap().as_str();
+            let definition = self.type_def(nodes.next().unwrap())?;
+            return Ok(Schema {
+                identifier: identifier.to_string(),
+                schema_definition: definition,
+            });
         }
 
         fn api(&self, api: Node) -> Result<Api> {
@@ -168,7 +179,7 @@ mod parser {
         fn endpoint(&self, endpoint: Node) -> Result<(HttpMethod, Endpoint)> {
             let mut inners = endpoint.into_inner();
             let method: HttpMethod = inners.expect_next_token(Rule::Method)?.into();
-            let operation_id = inners.expect_next_token(Rule::Identifier)?.as_str();
+            let operation_id = inners.expect_next_token(Rule::IDENTIFIER)?.as_str();
 
             let parameter_node = inners.expect_next_token(Rule::Parameters)?; // TODO parameters
             let mut parameters = vec![];
@@ -196,7 +207,7 @@ mod parser {
         fn parameter(&self, parameter: Node) -> Result<Parameter> {
             let mut iter = parameter.into_inner();
             let annotations = Self::process(iter.expect_next_token(Rule::Annotations)?)?;
-            let identifier = iter.expect_next_token(Rule::Identifier)?;
+            let identifier = iter.expect_next_token(Rule::IDENTIFIER)?;
             let type_def = iter.expect_next_token(Rule::TypeDef)?;
             return Ok(Parameter {
                 name: identifier.as_str().to_string(),
@@ -210,7 +221,7 @@ mod parser {
 
             for annotation in annotations.into_inner() {
                 let mut tokens = annotation.into_inner();
-                let identifier = tokens.expect_next_token(Rule::Identifier)?;
+                let identifier = tokens.expect_next_token(Rule::IDENTIFIER)?;
                 match identifier.as_str() {
                     "Path" => parameter_type = Some(ParameterType::Path),
                     "Query" => parameter_type = Some(ParameterType::Query),
@@ -246,23 +257,20 @@ mod parser {
             let identificator = inners.next().unwrap().as_str();
             let schema_definition = self.schema_definition(inners.next().unwrap())?;
             return Ok(Schema {
-                identificator: identificator.to_owned(),
+                identifier: identificator.to_owned(),
                 schema_definition,
             });
         }
 
         fn schema_definition(&self, schema_definition: Node) -> Result<SchemaDefinition> {
-            let inner = schema_definition.into_inner().next().unwrap();
-            let schema_definition = match inner.as_rule() {
-                Rule::TypeDef => self.type_def(inner)?,
-                Rule::Fields => {
-                    let inners = inner.into_inner();
-                    let fields = self.fields(inners)?;
-                    SchemaDefinition::Object { fields: fields }
-                }
-                _ => unimplemented!(),
-            };
-            return Ok(schema_definition);
+            if schema_definition.as_rule() == Rule::Fields {
+                let inners = schema_definition.into_inner();
+                let fields = self.fields(inners)?;
+                return Ok(SchemaDefinition::Object { fields });
+            } else {
+                //print!("{:#?}", inner);
+                unimplemented!()
+            }
         }
 
         fn type_def(&self, node: Node) -> Result<SchemaDefinition> {
@@ -282,14 +290,14 @@ mod parser {
                     .into_inner()
                     .expect_next_token(Rule::TypeDef)?
                     .into_inner()
-                    .expect_next_token(Rule::Identifier)?;
-                let ident: &str = &self.find_schema(name.as_str())?.identificator;
+                    .expect_next_token(Rule::IDENTIFIER)?;
+                let ident: &str = &self.find_schema(name.as_str())?.identifier;
                 let reference = SchemaDefinition::Reference { name: ident.into() };
                 return Ok(SchemaDefinition::Array {
                     schema: Rc::new(reference),
                 });
             }
-            if let Rule::Identifier = node.as_rule() {
+            if let Rule::IDENTIFIER = node.as_rule() {
                 let schema = self.find_schema(node.as_str())?;
                 return Ok(schema.into());
             }
@@ -309,7 +317,7 @@ mod parser {
             let schema = self
                 .schemas
                 .iter()
-                .find(|schema| schema.identificator == identificator);
+                .find(|schema| schema.identifier == identificator);
             if schema.is_none() {
                 bail!("{identificator} is not a kown type");
             }
@@ -361,14 +369,14 @@ mod parser {
 
     #[derive(Debug)]
     pub struct Schema {
-        pub identificator: String,
+        pub identifier: String,
         pub schema_definition: SchemaDefinition,
     }
 
     impl Into<SchemaDefinition> for &Schema {
         fn into(self) -> SchemaDefinition {
             return SchemaDefinition::Reference {
-                name: self.identificator.clone(),
+                name: self.identifier.clone(),
             };
         }
     }
@@ -677,7 +685,7 @@ mod generator {
     impl Schema {
         fn generate(&self) -> (String, openapiv3::Schema) {
             let schema = (&self.schema_definition).into();
-            return (self.identificator.to_owned(), schema);
+            return (self.identifier.to_owned(), schema);
         }
     }
 

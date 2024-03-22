@@ -1,21 +1,23 @@
-ApiScript  =  { SOI ~ (Schema | Api)* ~ EOI }
-Schema     =  { "schema" ~ Identifier ~ "=" ~ SchemaDef }
-SchemaDef  =  { TypeDef | "{" ~ Fields ~ "}" }
-Fields     =  { Field* }
-Optional   =  { "?" }
-TypeDef    =  {
+ApiScript = { SOI ~ (Schema | Api | Type)* ~ EOI }
+
+Schema = { "schema" ~ IDENTIFIER ~ "{" ~ Fields ~ "}" }
+Type   = { "type" ~ IDENTIFIER ~ ":" ~ TypeDef }
+
+Fields   = { Field* }
+Optional = { "?" }
+TypeDef  = {
     Primitive ~ ("#" ~ Format)?
   | List
-  | Identifier
+  | IDENTIFIER
 }
-List       =  { "[" ~ TypeDef ~ "]" }
-Identifier = @{ ASCII_ALPHA ~ ASCII_ALPHANUMERIC* }
 
-Format    = { "date" | "date-time" | "password" | "byte" | "binary" | Identifier }
-Field     = { Identifier ~ ":" ~ TypeDef ~ Optional? }
+List = { "[" ~ TypeDef ~ "]" }
+
+Format    = { "date" | "date-time" | "password" | "byte" | "binary" | IDENTIFIER }
+Field     = { IDENTIFIER ~ ":" ~ TypeDef ~ Optional? }
 Primitive = { "string" | "number" | "integer" | "boolean" }
 
-Api         =  { "api" ~ Identifier ~ Version ~ "{" ~ Paths ~ "}" }
+Api         =  { "api" ~ IDENTIFIER ~ Version ~ "{" ~ Paths ~ "}" }
 Paths       =  { Path* }
 Version     = @{ "\"" ~ VERSION ~ "\"" }
 Path        =  { "path" ~ "\"" ~ UrlPath ~ "\"" ~ "{" ~ Endpoints ~ "}" }
@@ -23,11 +25,11 @@ Endpoints   =  { Endpoint* }
 UrlPath     =  { PATH }
 Endpoint    =  { Method ~ OperationId ~ "(" ~ Parameters? ~ ")" ~ "{" ~ Responses ~ "}" }
 Method      =  { "GET" | "PUT" | "POST" | "DELETE" | "PATCH" }
-OperationId = _{ Identifier }
+OperationId = _{ IDENTIFIER }
 Parameters  =  { Parameter ~ ("," ~ Parameter)* }
 Annotations =  { Annotation* }
-Annotation  =  { "@" ~ Identifier ~ ("(" ~ ")")? }
-Parameter   =  { Annotations ~ Identifier ~ ":" ~ TypeDef }
+Annotation  =  { "@" ~ IDENTIFIER ~ ("(" ~ ")")? }
+Parameter   =  { Annotations ~ IDENTIFIER ~ ":" ~ TypeDef }
 Responses   =  { Response* }
 Response    =  { HTTP_CODE ~ ":" ~ TypeDef }
 
@@ -35,3 +37,4 @@ HTTP_CODE  = @{ ASCII_DIGIT+ }
 PATH       = @{ (ASCII_ALPHANUMERIC | "/" | "{" | "}")* }
 VERSION    = @{ (ASCII_DIGIT | ".")+ }
 WHITESPACE = _{ " " | NEWLINE }
+IDENTIFIER = @{ ASCII_ALPHA ~ ASCII_ALPHANUMERIC* }

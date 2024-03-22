@@ -1,20 +1,21 @@
-schema Date = string#date
 
-schema ContainerId = string
+type Date: string#date
 
-schema Container = {
+type ContainerId: string
+
+schema Container {
   id: ContainerId
   tare: integer?
   gross: integer?
 }
 
-schema Booking = {
+schema Booking {
   delivery: string#date
   address: string
   containers: [Container]
 }
 
-schema Problem = {
+schema Problem {
   description: string
 }
 
