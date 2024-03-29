@@ -59,6 +59,7 @@ fn combine_apis(apis: &Vec<OpenAPI>) -> Result<String> {
 fn compile(path: &std::path::Path) -> Result<Vec<OpenAPI>> {
     let input = fs::read_to_string(path)?;
     let api_script = parser::parse(&input)?;
+    println!("{:#?}", api_script);
     let apis = generator::generate(&api_script);
     return Ok(apis);
 }
@@ -141,21 +142,30 @@ mod parser {
         }
 
         fn api(&self, api: Node) -> Result<Api> {
+            println!("{:#?}", api);
             let mut nodes = api.into_inner();
-            let identifier = nodes.next().unwrap().as_str();
-            let version = nodes.next().unwrap().as_str();
-            let path_nodes = nodes.next().unwrap();
+            let _ = nodes.expect_next_token(Rule::Annotations)?;
+            let identifier = nodes.expect_next_token(Rule::Identifier)?.as_str();
+            let version = nodes.expect_next_token(Rule::String)?.as_str();
+            let path_nodes = nodes.expect_next_token(Rule::ApiBody)?;
 
             let mut paths: IndexMap<String, Path> = indexmap!();
+            let mut servers: Vec<String> = vec![];
             for path_node in path_nodes.into_inner() {
-                let (url, path) = self.path(path_node)?;
-                paths.insert(url, path);
+                match path_node.as_rule() {
+                    Rule::Server => (),
+                    Rule::ApiPath => {
+                        let (url, path) = self.path(path_node)?;
+                        paths.insert(url, path);
+                    }
+                    _ => (),
+                }
             }
 
             return Ok(Api {
                 name: identifier.into(),
                 version: version.into(),
-                paths: paths,
+                paths,
             });
         }
 
@@ -179,7 +189,7 @@ mod parser {
         fn endpoint(&self, endpoint: Node) -> Result<(HttpMethod, Endpoint)> {
             let mut inners = endpoint.into_inner();
             let method: HttpMethod = inners.expect_next_token(Rule::Method)?.into();
-            let operation_id = inners.expect_next_token(Rule::IDENTIFIER)?.as_str();
+            let operation_id = inners.expect_next_token(Rule::Identifier)?.as_str();
 
             let parameter_node = inners.expect_next_token(Rule::Parameters)?; // TODO parameters
             let mut parameters = vec![];
@@ -206,43 +216,24 @@ mod parser {
 
         fn parameter(&self, parameter: Node) -> Result<Parameter> {
             let mut iter = parameter.into_inner();
-            let annotations = Self::process(iter.expect_next_token(Rule::Annotations)?)?;
-            let identifier = iter.expect_next_token(Rule::IDENTIFIER)?;
-            let type_def = iter.expect_next_token(Rule::TypeDef)?;
-            return Ok(Parameter {
-                name: identifier.as_str().to_string(),
-                parameter_type: annotations.parameter_type,
-                kind: self.type_def(type_def)?,
-            });
-        }
+            let annotations =
+                ParameterAnnotations::process(iter.expect_next_token(Rule::Annotations)?)?;
+            let identifier = iter.expect_next_token(Rule::Identifier)?;
+            let type_def = iter.expect_next_token(Rule::SchemaDefinition)?;
 
-        fn process(annotations: Node) -> Result<ParameterResult, ParseError> {
-            let mut parameter_type = None;
-
-            for annotation in annotations.into_inner() {
-                let mut tokens = annotation.into_inner();
-                let identifier = tokens.expect_next_token(Rule::IDENTIFIER)?;
-                match identifier.as_str() {
-                    "Path" => parameter_type = Some(ParameterType::Path),
-                    "Query" => parameter_type = Some(ParameterType::Query),
-                    _ => (),
-                }
-            }
-
-            return Ok(ParameterResult {
-                parameter_type: parameter_type.unwrap_or(ParameterType::Query),
-            });
+            return Ok(Parameter::new(
+                identifier.as_str().to_string(),
+                self.type_def(type_def)?,
+                annotations,
+            ));
         }
 
         fn response(&self, response: Node) -> Result<(HttpCode, Responses)> {
             assert!(response.as_rule() == Rule::Response);
             let mut inners = response.into_inner();
 
-            let http_code: u16 = inners
-                .expect_next_token(Rule::HTTP_CODE)?
-                .as_str()
-                .parse()?;
-            let type_def = self.type_def(inners.expect_next_token(Rule::TypeDef)?)?;
+            let http_code: u16 = inners.expect_next_token(Rule::HttpCode)?.as_str().parse()?;
+            let type_def = self.type_def(inners.expect_next_token(Rule::SchemaDefinition)?)?;
 
             return Ok((
                 http_code,
@@ -281,23 +272,23 @@ mod parser {
         }
 
         fn parse_type(&self, node: Node) -> Result<SchemaDefinition> {
-            if let Rule::TypeDef = node.as_rule() {
+            if let Rule::SchemaDefinition = node.as_rule() {
                 return self.type_def(node);
             }
             if let Rule::List = node.as_rule() {
                 // TODO allow declaring types in lists?
                 let name = node
                     .into_inner()
-                    .expect_next_token(Rule::TypeDef)?
+                    .expect_next_token(Rule::SchemaDefinition)?
                     .into_inner()
-                    .expect_next_token(Rule::IDENTIFIER)?;
+                    .expect_next_token(Rule::Identifier)?;
                 let ident: &str = &self.find_schema(name.as_str())?.identifier;
                 let reference = SchemaDefinition::Reference { name: ident.into() };
                 return Ok(SchemaDefinition::Array {
                     schema: Rc::new(reference),
                 });
             }
-            if let Rule::IDENTIFIER = node.as_rule() {
+            if let Rule::Identifier = node.as_rule() {
                 let schema = self.find_schema(node.as_str())?;
                 return Ok(schema.into());
             }
@@ -363,8 +354,45 @@ mod parser {
         }
     }
 
-    struct ParameterResult {
+    #[derive(Debug, Clone)]
+    struct ParameterAnnotations {
         parameter_type: ParameterType,
+        constraints: Vec<Constraint>,
+    }
+
+    impl ParameterAnnotations {
+        fn process(annotations: Node) -> Result<ParameterAnnotations> {
+            let mut parameter_type = None;
+            let mut constraints = vec![];
+
+            for annotation in annotations.into_inner() {
+                let mut tokens = annotation.into_inner();
+                let identifier = tokens.expect_next_token(Rule::Identifier)?;
+                match identifier.as_str() {
+                    "Path" => parameter_type = Some(ParameterType::Path),
+                    "Query" => parameter_type = Some(ParameterType::Query),
+                    "Max" => {
+                        let max = tokens
+                            .expect_next_token(Rule::NumberValue)?
+                            .as_str()
+                            .parse()?;
+                        constraints.push(Constraint::Maximum(max));
+                    }
+                    _ => (),
+                }
+            }
+
+            return Ok(ParameterAnnotations {
+                parameter_type: parameter_type.unwrap_or(ParameterType::Query),
+                constraints,
+            });
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    enum Constraint {
+        Maximum(u32),
+        Minimum(u32),
     }
 
     #[derive(Debug)]
@@ -456,8 +484,27 @@ mod parser {
     #[derive(Debug, Clone, Getters)]
     pub struct Parameter {
         name: String,
-        parameter_type: ParameterType,
         kind: SchemaDefinition,
+        parameter_type: ParameterType,
+        constraints: Vec<Constraint>,
+    }
+
+    impl Parameter {
+        fn new<S>(
+            identifier: S,
+            kind: SchemaDefinition,
+            annotations: ParameterAnnotations,
+        ) -> Parameter
+        where
+            S: AsRef<str>,
+        {
+            Parameter {
+                name: identifier.as_ref().to_string(),
+                parameter_type: annotations.parameter_type,
+                constraints: annotations.constraints,
+                kind,
+            }
+        }
     }
 
     #[derive(Debug, Clone)]

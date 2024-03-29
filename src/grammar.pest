@@ -1,40 +1,46 @@
 ApiScript = { SOI ~ (Schema | Api | Type)* ~ EOI }
 
-Schema = { "schema" ~ IDENTIFIER ~ "{" ~ Fields ~ "}" }
-Type   = { "type" ~ IDENTIFIER ~ ":" ~ TypeDef }
+// Types
+Schema           = { "schema" ~ Identifier ~ "{" ~ Fields ~ "}" }
+Type             = { "type" ~ Identifier ~ ":" ~ SchemaDefinition }
+SchemaDefinition = { Primitive ~ ("#" ~ Format)? | List | Identifier }
+Fields           = { Field* }
+Field            = { Identifier ~ ":" ~ SchemaDefinition ~ Optional? }
+Optional         = { "?" }
+List             = { "[" ~ SchemaDefinition ~ "]" }
+Format           = { "date" | "date-time" | "password" | "byte" | "binary" | Identifier }
+Primitive        = { "string" | "number" | "integer" | "boolean" }
 
-Fields   = { Field* }
-Optional = { "?" }
-TypeDef  = {
-    Primitive ~ ("#" ~ Format)?
-  | List
-  | IDENTIFIER
-}
+// Annotations
+Annotations = { Annotation* }
+Annotation  = { "@" ~ Identifier ~ ("(" ~ Value ~ ")")? }
 
-List = { "[" ~ TypeDef ~ "]" }
+// Values
+Value       = _{ String | ArrayValue | Identifier | NumberValue }
+ArrayValue  = @{ "[" ~ ((String | SchemaDefinition) ~ ",")* }
+NumberValue = @{ ASCII_DIGIT* }
 
-Format    = { "date" | "date-time" | "password" | "byte" | "binary" | IDENTIFIER }
-Field     = { IDENTIFIER ~ ":" ~ TypeDef ~ Optional? }
-Primitive = { "string" | "number" | "integer" | "boolean" }
-
-Api         =  { "api" ~ IDENTIFIER ~ Version ~ "{" ~ Paths ~ "}" }
-Paths       =  { Path* }
-Version     = @{ "\"" ~ VERSION ~ "\"" }
-Path        =  { "path" ~ "\"" ~ UrlPath ~ "\"" ~ "{" ~ Endpoints ~ "}" }
+// Api
+Api         =  { Annotations ~ "api" ~ Identifier ~ Version ~ "{" ~ ApiBody ~ "}" }
+ApiBody     =  { (ApiPath | Server)* }
+Server      =  { "server" ~ String ~ ("{" ~ "}")? }
+Version     = _{ String }
+ApiPath     =  { "path" ~ "\"" ~ UrlPath ~ "\"" ~ "{" ~ Endpoints ~ "}" }
 Endpoints   =  { Endpoint* }
-UrlPath     =  { PATH }
+UrlPath     =  { Path }
 Endpoint    =  { Method ~ OperationId ~ "(" ~ Parameters? ~ ")" ~ "{" ~ Responses ~ "}" }
 Method      =  { "GET" | "PUT" | "POST" | "DELETE" | "PATCH" }
-OperationId = _{ IDENTIFIER }
+OperationId = _{ Identifier }
 Parameters  =  { Parameter ~ ("," ~ Parameter)* }
-Annotations =  { Annotation* }
-Annotation  =  { "@" ~ IDENTIFIER ~ ("(" ~ ")")? }
-Parameter   =  { Annotations ~ IDENTIFIER ~ ":" ~ TypeDef }
+Parameter   =  { Annotations ~ Identifier ~ ":" ~ SchemaDefinition }
 Responses   =  { Response* }
-Response    =  { HTTP_CODE ~ ":" ~ TypeDef }
+Response    =  { HttpCode ~ ":" ~ SchemaDefinition }
 
-HTTP_CODE  = @{ ASCII_DIGIT+ }
-PATH       = @{ (ASCII_ALPHANUMERIC | "/" | "{" | "}")* }
-VERSION    = @{ (ASCII_DIGIT | ".")+ }
+// General Patterns
+HttpCode   = @{ ASCII_DIGIT+ }
+Path       = @{ (ASCII_ALPHANUMERIC | "/" | "{" | "}")* }
+Identifier = @{ ASCII_ALPHA ~ ASCII_ALPHANUMERIC* }
+String     = @{ "\"" ~ (!("\"") ~ ANY)* ~ "\"" }
+
+// VERSION    = _{ ASCII_ALPHANUMERIC | "." }
 WHITESPACE = _{ " " | NEWLINE }
-IDENTIFIER = @{ ASCII_ALPHA ~ ASCII_ALPHANUMERIC* }

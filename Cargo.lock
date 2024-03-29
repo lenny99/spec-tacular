@@ -57,23 +57,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a4668cab20f66d8d020e1fbc0ebe47217433c1b6c8f2040faf858554e394ace6"
 
 [[package]]
-name = "api_script"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "derive-getters",
- "indexmap",
- "itertools",
- "mediatype",
- "openapiv3",
- "pest",
- "pest_derive",
- "serde",
- "serde_yaml",
-]
-
-[[package]]
 name = "block-buffer"
 version = "0.10.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -251,6 +234,23 @@ name = "memchr"
 version = "2.6.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f232d6ef707e1956a43342693d2a31e72989554d58299d7a88738cc95b0d35c"
+
+[[package]]
+name = "oal"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "derive-getters",
+ "indexmap",
+ "itertools",
+ "mediatype",
+ "openapiv3",
+ "pest",
+ "pest_derive",
+ "serde",
+ "serde_yaml",
+]
 
 [[package]]
 name = "once_cell"

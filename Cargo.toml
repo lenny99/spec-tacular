@@ -1,5 +1,5 @@
 [package]
-name = "api_script"
+name = "oal"
 version = "0.1.0"
 edition = "2021"
 

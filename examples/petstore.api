@@ -1,83 +1,65 @@
 
 schema Pet {
-  id: int#int64
+  id: integer#int64
   name: string
-  tag?: string
+  tag: string?
 }
 
-schema Pets = Pet[]
+type Pets : [Pet]
 
-type Int64 = integer#int64
+type Int64 : integer#int64
 
 schema Error {
-  code: int#int32
+  code: integer#int32
   message: string
 }
 
-/**
- * A booking API
- * @termsOfService https://link
- * @contact Max Mustermann
- * @license MIT
- */
+@termsOfService("https://link")
+@contact("Max Mustermann")
+@license("MIT")
 api "Swagger Petstore" "0.0.1" {
 
-  servers = [
-    { url = "http://petstore.swagger.io/v1" }
-  ]
+	server "http://petstore.swagger.io/v1"
 
   // TODO consumes / produces as dynamic
   // TODO escape hatch: include? block with yaml?
 
   path /pets {
-    /**
-     * Returns all pets from the system that the user has access to
-     * @summary List all pets
-     * @tags pets
-     * @param limit How many items to return at one time (max 100)
-     * @produces application/json
-     */
-    GET listPets(@Query @Max(100) limit?: Int64) { // or int#int64
-      /**
-       * A paged array of pets
-       */
+		/// Returns all pets from the system that the user has access to
+		@Summary("Lists all pets")
+		@Tags(["pets"])
+    GET listPets(
+			@Query(description: "How many items to return at one time") limit: @Max(100) Int64?
+		) {
+			/// A paged array of pets
       @Header(
-        name: x-next
-        schema: string
-        description: A link to the next page of responses
+        name: "x-next",
+        schema: string,
+        description: "A link to the next page of responses",
       )
-      200     => Pets as application/json;
-      /**
-       * Unexpected Error
-       */
-      default => Error as application/json;
+      200: Pets as application/json;
+			/// Unexpected Error
+      default: Error as application/json;
     }
-    /**
-     * @summary Create a pet
-     * @tags pets
-     */
+		@Summary("Create a pet")
+		@Tags(["pets"])
     POST createPets() {
-      /**
-       * Null response
-       */
-      201     => undefined;
-      default => Error as application/json;
+			/// Null reponse
+      201: undefined;
+      default: Error as application/json;
     }
   }
 
   // TODO another syntax for tags because it results in api-classes
   // TODO? declare path params at path level
   path /pets/:petId {
-    /**
-     * Info for a specific pet
-     * @tags pets 
-     * @param petId The id of the pet to retrieve
-     */
+		@Tags("pets")
+		@Param("petId The id of the pet to retrieve")
     GET showPetById(@Path petId: string) {
-      /* Expected response to a valid request */
-      200     => Pet as application/json;
-      /* unexpected error */
-      default => Error as application/json
+      /// Expected response to a valid request
+      200: Pet as application/json;
+      /// unexpected error
+      default: Error as application/json
     }
   }
 }
