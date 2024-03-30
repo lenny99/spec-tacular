@@ -142,7 +142,6 @@ mod parser {
         }
 
         fn api(&self, api: Node) -> Result<Api> {
-            println!("{:#?}", api);
             let mut nodes = api.into_inner();
             let _ = nodes.expect_next_token(Rule::Annotations)?;
             let identifier = nodes.expect_next_token(Rule::Identifier)?.as_str();
@@ -191,7 +190,7 @@ mod parser {
             let method: HttpMethod = inners.expect_next_token(Rule::Method)?.into();
             let operation_id = inners.expect_next_token(Rule::Identifier)?.as_str();
 
-            let parameter_node = inners.expect_next_token(Rule::Parameters)?; // TODO parameters
+            let parameter_node = inners.expect_next_token(Rule::Parameters)?;
             let mut parameters = vec![];
             for node in parameter_node.into_inner() {
                 parameters.push(self.parameter(node)?);
@@ -219,11 +218,13 @@ mod parser {
             let annotations =
                 ParameterAnnotations::process(iter.expect_next_token(Rule::Annotations)?)?;
             let identifier = iter.expect_next_token(Rule::Identifier)?;
-            let type_def = iter.expect_next_token(Rule::SchemaDefinition)?;
-
+            let mut schema = self.type_def(iter.expect_next_token(Rule::SchemaDefinition)?)?;
+            // TODO apply annotations at type creaton? create new types when existing types are
+            // referenced with annotations?
+            schema.constrained_by(&annotations);
             return Ok(Parameter::new(
                 identifier.as_str().to_string(),
-                self.type_def(type_def)?,
+                schema,
                 annotations,
             ));
         }
@@ -253,25 +254,25 @@ mod parser {
             });
         }
 
-        fn schema_definition(&self, schema_definition: Node) -> Result<SchemaDefinition> {
+        fn schema_definition(&self, schema_definition: Node) -> Result<Definition> {
             if schema_definition.as_rule() == Rule::Fields {
                 let inners = schema_definition.into_inner();
                 let fields = self.fields(inners)?;
-                return Ok(SchemaDefinition::Object { fields });
+                return Ok(Definition::Object { fields });
             } else {
                 //print!("{:#?}", inner);
                 unimplemented!()
             }
         }
 
-        fn type_def(&self, node: Node) -> Result<SchemaDefinition> {
+        fn type_def(&self, node: Node) -> Result<Definition> {
             let mut inners = node.into_inner().into_iter();
             let name = inners.next().unwrap();
             let schema = self.parse_type(name)?;
             return Ok(schema);
         }
 
-        fn parse_type(&self, node: Node) -> Result<SchemaDefinition> {
+        fn parse_type(&self, node: Node) -> Result<Definition> {
             if let Rule::SchemaDefinition = node.as_rule() {
                 return self.type_def(node);
             }
@@ -283,8 +284,8 @@ mod parser {
                     .into_inner()
                     .expect_next_token(Rule::Identifier)?;
                 let ident: &str = &self.find_schema(name.as_str())?.identifier;
-                let reference = SchemaDefinition::Reference { name: ident.into() };
-                return Ok(SchemaDefinition::Array {
+                let reference = Definition::Reference { name: ident.into() };
+                return Ok(Definition::Array {
                     schema: Rc::new(reference),
                 });
             }
@@ -295,10 +296,11 @@ mod parser {
             if let Rule::Primitive = node.as_rule() {
                 let primitive = ApiScript::primitive(node)?;
 
-                return Ok(SchemaDefinition::NewType {
-                    primitive: primitive,
+                return Ok(Definition::Primitive(Basic {
+                    privitive: primitive,
                     format: None,
-                });
+                    constraints: Vec::new(),
+                }));
             }
 
             bail!("Could not determine type")
@@ -390,52 +392,69 @@ mod parser {
     }
 
     #[derive(Debug, Clone)]
-    enum Constraint {
-        Maximum(u32),
-        Minimum(u32),
-    }
-
-    #[derive(Debug)]
     pub struct Schema {
         pub identifier: String,
-        pub schema_definition: SchemaDefinition,
+        pub schema_definition: Definition,
     }
 
-    impl Into<SchemaDefinition> for &Schema {
-        fn into(self) -> SchemaDefinition {
-            return SchemaDefinition::Reference {
+    impl Into<Definition> for &Schema {
+        fn into(self) -> Definition {
+            return Definition::Reference {
                 name: self.identifier.clone(),
             };
         }
     }
 
     #[derive(Debug, Clone)]
-    pub enum SchemaDefinition {
-        NewType {
-            primitive: Primitive,
-            format: Option<Format>,
-        },
-        Array {
-            schema: Rc<SchemaDefinition>,
-        },
-        Object {
-            fields: Vec<Field>,
-        },
+    pub enum Definition {
+        Primitive(Basic),
+        Array { schema: Rc<Definition> },
+        Object { fields: Vec<Field> },
         // TODO move into ReferenceOr type like openapiv3
-        Reference {
-            name: String,
-        },
+        Reference { name: String },
+    }
+
+    impl Definition {
+        fn constrained_by(self: &mut Self, annotations: &ParameterAnnotations) {
+            match self {
+                Definition::Primitive(basic) => basic.constrained_by(annotations),
+                Definition::Array { schema } => todo!(),
+                Definition::Object { fields } => todo!(),
+                Definition::Reference { name } => todo!(),
+            }
+        }
+    }
+
+    #[derive(Debug, Clone, Getters)]
+    pub struct Basic {
+        privitive: Primitive,
+        format: Option<Format>,
+        constraints: Vec<Constraint>,
+    }
+
+    impl Basic {
+        fn constrained_by(self: &mut Self, annotations: &ParameterAnnotations) {
+            for constraint in &annotations.constraints {
+                self.constraints.push(constraint.clone())
+            }
+        }
+    }
+
+    #[derive(Debug, Clone)]
+    pub enum Constraint {
+        Maximum(usize),
+        Minimum(usize),
     }
 
     #[derive(Debug, Clone, Getters)]
     pub struct Field {
         name: String,
-        definition: SchemaDefinition,
+        definition: Definition,
         required: bool,
     }
 
     impl Field {
-        fn new(name: String, definition: SchemaDefinition, required: bool) -> Self {
+        fn new(name: String, definition: Definition, required: bool) -> Self {
             Field {
                 name,
                 definition,
@@ -484,17 +503,13 @@ mod parser {
     #[derive(Debug, Clone, Getters)]
     pub struct Parameter {
         name: String,
-        kind: SchemaDefinition,
+        kind: Definition,
         parameter_type: ParameterType,
         constraints: Vec<Constraint>,
     }
 
     impl Parameter {
-        fn new<S>(
-            identifier: S,
-            kind: SchemaDefinition,
-            annotations: ParameterAnnotations,
-        ) -> Parameter
+        fn new<S>(identifier: S, kind: Definition, annotations: ParameterAnnotations) -> Parameter
         where
             S: AsRef<str>,
         {
@@ -515,7 +530,7 @@ mod parser {
         Cookie,
     }
 
-    pub type Responses = IndexMap<MediaTypeBuf, SchemaDefinition>;
+    pub type Responses = IndexMap<MediaTypeBuf, Definition>;
     pub type HttpCode = u16;
 
     #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -543,8 +558,8 @@ mod parser {
 
 mod generator {
     use crate::parser::{
-        Api, ApiScript, Endpoint, Field, Format, HttpMethod, ParameterType, Path, Primitive,
-        Schema, SchemaDefinition,
+        Api, ApiScript, Basic, Constraint, Definition, Endpoint, Field, Format, HttpMethod,
+        ParameterType, Path, Primitive, Schema,
     };
     use anyhow::bail;
     use indexmap::{indexmap, IndexMap};
@@ -687,7 +702,7 @@ mod generator {
         }
 
         fn to_content(
-            map: &IndexMap<MediaTypeBuf, SchemaDefinition>,
+            map: &IndexMap<MediaTypeBuf, Definition>,
         ) -> IndexMap<String, openapiv3::MediaType> {
             let mut result = indexmap!();
             for (media_type, definition) in map {
@@ -704,7 +719,7 @@ mod generator {
         }
     }
 
-    impl Into<openapiv3::ParameterSchemaOrContent> for &SchemaDefinition {
+    impl Into<openapiv3::ParameterSchemaOrContent> for &Definition {
         fn into(self) -> openapiv3::ParameterSchemaOrContent {
             let schema = openapiv3::ReferenceOr::Item(self.into());
             return openapiv3::ParameterSchemaOrContent::Schema(schema);
@@ -738,24 +753,24 @@ mod generator {
 
     type ReferenceOrSchemaKind = openapiv3::ReferenceOr<openapiv3::SchemaKind>;
 
-    impl Into<openapiv3::Schema> for &SchemaDefinition {
+    impl Into<openapiv3::Schema> for &Definition {
         fn into(self) -> openapiv3::Schema {
             match &self {
-                SchemaDefinition::NewType { primitive, format } => {
+                Definition::Primitive(basic) => {
                     return openapiv3::Schema {
-                        schema_kind: primitive.as_schema_type(format.clone()), // ?
+                        schema_kind: basic.into(),
                         schema_data: openapiv3::SchemaData::default(),
                     };
                 }
-                SchemaDefinition::Object { fields } => {
+                Definition::Object { fields } => {
                     return openapiv3::Schema {
                         schema_data: openapiv3::SchemaData {
                             ..Default::default()
                         },
                         schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::Object(
                             openapiv3::ObjectType {
-                                properties: SchemaDefinition::properties(fields),
-                                required: SchemaDefinition::required_properties(fields),
+                                properties: Definition::properties(fields),
+                                required: Definition::required_properties(fields),
                                 ..Default::default()
                             },
                         )),
@@ -766,7 +781,7 @@ mod generator {
         }
     }
 
-    impl SchemaDefinition {
+    impl Definition {
         fn properties(
             fields: &Vec<Field>,
         ) -> IndexMap<String, openapiv3::ReferenceOr<Box<openapiv3::Schema>>> {
@@ -789,8 +804,8 @@ mod generator {
             return map;
         }
 
-        fn required_properties(feilds: &Vec<Field>) -> Vec<String> {
-            feilds
+        fn required_properties(fields: &Vec<Field>) -> Vec<String> {
+            fields
                 .iter()
                 .filter(|f| *f.required())
                 .map(|f| f.name().clone())
@@ -798,19 +813,16 @@ mod generator {
         }
     }
 
-    impl Into<ReferenceOrSchemaKind> for &SchemaDefinition {
+    impl Into<ReferenceOrSchemaKind> for &Definition {
         fn into(self) -> ReferenceOrSchemaKind {
             match self {
-                SchemaDefinition::NewType { primitive, format } => {
-                    let schema_kind = primitive.as_schema_type(format.clone());
-                    return ReferenceOrSchemaKind::Item(schema_kind);
-                }
-                SchemaDefinition::Reference { name } => {
+                Definition::Primitive(basic) => ReferenceOrSchemaKind::Item(basic.into()),
+                Definition::Reference { name } => {
                     let path = format!("#/components/schemas/{}", name);
                     return ReferenceOrSchemaKind::Reference { reference: path };
                 }
-                SchemaDefinition::Array { schema } => {
-                    if let SchemaDefinition::Reference { name } = schema.as_ref() {
+                Definition::Array { schema } => {
+                    if let Definition::Reference { name } = schema.as_ref() {
                         let path = format!("#/components/schemas/{name}");
                         let reference =
                             ReferenceOr::<Box<openapiv3::Schema>>::Reference { reference: path };
@@ -833,9 +845,9 @@ mod generator {
         }
     }
 
-    impl Into<ReferenceOr<openapiv3::Schema>> for &SchemaDefinition {
+    impl Into<ReferenceOr<openapiv3::Schema>> for &Definition {
         fn into(self) -> ReferenceOr<openapiv3::Schema> {
-            if let SchemaDefinition::Reference { name } = self {
+            if let Definition::Reference { name } = self {
                 return ReferenceOr::Reference {
                     reference: format!("#/components/schemas/{name}"),
                 };
@@ -846,33 +858,59 @@ mod generator {
         }
     }
 
-    impl Primitive {
-        fn as_schema_type(&self, format: Option<Format>) -> openapiv3::SchemaKind {
-            let openapi_format: openapiv3::VariantOrUnknownOrEmpty<openapiv3::StringFormat> =
-                format.map_or(openapiv3::VariantOrUnknownOrEmpty::Empty, Format::as_format);
-            let openapi_type = match self {
+    impl Into<openapiv3::SchemaKind> for &Basic {
+        fn into(self) -> openapiv3::SchemaKind {
+            let mut kind = match self.privitive() {
                 Primitive::String => openapiv3::Type::String(openapiv3::StringType {
-                    format: openapi_format,
+                    format: format_or_else(self),
                     ..Default::default()
                 }),
                 Primitive::Number => openapiv3::Type::Number(openapiv3::NumberType::default()),
                 Primitive::Integer => openapiv3::Type::Integer(openapiv3::IntegerType::default()),
                 Primitive::Boolean => openapiv3::Type::Boolean {},
             };
-            return openapiv3::SchemaKind::Type(openapi_type);
+
+            apply_constraint(&mut kind, self.constraints().as_slice());
+
+            return openapiv3::SchemaKind::Type(kind);
         }
     }
 
-    impl Format {
-        fn as_format(self) -> openapiv3::VariantOrUnknownOrEmpty<openapiv3::StringFormat> {
+    fn format_or_else(
+        basic: &Basic,
+    ) -> openapiv3::VariantOrUnknownOrEmpty<openapiv3::StringFormat> {
+        if let Some(format) = basic.format() {
+            return openapiv3::VariantOrUnknownOrEmpty::Item(format.into());
+        }
+        return openapiv3::VariantOrUnknownOrEmpty::Empty;
+    }
+
+    fn apply_constraint(kind: &mut openapiv3::Type, constraints: &[Constraint]) {
+        for constraint in constraints {
+            match constraint {
+                Constraint::Maximum(max) => set_max(kind, *max),
+                _ => (),
+            }
+        }
+    }
+
+    fn set_max(kind: &mut openapiv3::Type, max: usize) {
+        match kind {
+            openapiv3::Type::String(str) => str.max_length = Some(max),
+            openapiv3::Type::Number(num) => num.maximum = Some(max as f64),
+            openapiv3::Type::Integer(int) => int.maximum = Some(max as i64),
+            _ => (),
+        }
+    }
+
+    impl Into<openapiv3::StringFormat> for &Format {
+        fn into(self) -> openapiv3::StringFormat {
             match self {
-                Format::Date => {
-                    openapiv3::VariantOrUnknownOrEmpty::Item(openapiv3::StringFormat::Date)
-                }
-                Format::DateTime => todo!(),
-                Format::Password => todo!(),
-                Format::Byte => todo!(),
-                Format::Binary => todo!(),
+                Format::Date => openapiv3::StringFormat::Date,
+                Format::DateTime => openapiv3::StringFormat::DateTime,
+                Format::Password => openapiv3::StringFormat::Password,
+                Format::Byte => openapiv3::StringFormat::Byte,
+                Format::Binary => openapiv3::StringFormat::Binary,
                 Format::Custom(_) => todo!(),
             }
         }
