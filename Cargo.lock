@@ -236,23 +236,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f232d6ef707e1956a43342693d2a31e72989554d58299d7a88738cc95b0d35c"
 
 [[package]]
-name = "oal"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "clap",
- "derive-getters",
- "indexmap",
- "itertools",
- "mediatype",
- "openapiv3",
- "pest",
- "pest_derive",
- "serde",
- "serde_yaml",
-]
-
-[[package]]
 name = "once_cell"
 version = "1.18.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -391,6 +374,23 @@ dependencies = [
  "cfg-if",
  "cpufeatures",
  "digest",
+]
+
+[[package]]
+name = "spec"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "clap",
+ "derive-getters",
+ "indexmap",
+ "itertools",
+ "mediatype",
+ "openapiv3",
+ "pest",
+ "pest_derive",
+ "serde",
+ "serde_yaml",
 ]
 
 [[package]]
