@@ -1,4 +1,4 @@
-use std::{error::Error, fmt::Display};
+use std::{error::Error, fmt::Display, rc::Rc};
 
 use crate::parser::Rule;
 use pest::{
@@ -82,5 +82,17 @@ impl Error for ParseError {}
 impl Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.message)
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ReferenceOr<Referenced, Actual> {
+    Reference(Rc<Referenced>),
+    Actual(Actual),
+}
+
+impl<Referenced, Actual> ReferenceOr<Referenced, Actual> {
+    pub fn reference_to(reference: Referenced) -> Self {
+        return Self::Reference(Rc::new(reference));
     }
 }

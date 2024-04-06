@@ -1,4 +1,3 @@
-use crate::util::*;
 use anyhow::{bail, Result};
 use indexmap::{indexmap, IndexMap};
 use itertools::Itertools;
@@ -8,6 +7,8 @@ use mediatype::{
 };
 use pest::Parser;
 use std::{rc::Rc, vec};
+
+use crate::util::*;
 
 pub fn parse(input: &str) -> Result<ApiScript> {
     let mut parse_tree = ApiScript::parse(Rule::ApiScript, input)?;
@@ -19,8 +20,169 @@ pub fn parse(input: &str) -> Result<ApiScript> {
 #[derive(Parser, Debug)]
 #[grammar = "grammar.pest"]
 pub struct ApiScript {
-    pub schemas: Vec<Schema>,
+    pub schemas: Vec<Rc<Schema>>,
     pub apis: Vec<Api>,
+}
+
+#[derive(Debug, Clone)]
+pub struct Schema {
+    pub identifier: String,
+    pub definition: Definition,
+}
+
+impl Schema {
+    fn new(identifier: String, definition: Definition) -> Schema {
+        return Schema {
+            identifier,
+            definition,
+        };
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Definition {
+    Primitive(Primitive),
+    Array(Rc<Schema>),
+    Object(Vec<Field>),
+}
+
+impl Definition {
+    fn primitive(kind: Kind, format: Option<Format>, constraints: Vec<Constraint>) -> Definition {
+        return Definition::Primitive(Primitive {
+            kind,
+            format,
+            constraints,
+        });
+    }
+
+    fn array(definition: Rc<Schema>) -> Definition {
+        return Definition::Array(definition);
+    }
+
+    fn constrained_by(self: &mut Self, annotations: &ParameterAnnotations) {
+        match self {
+            Definition::Primitive(basic) => basic.constrained_by(annotations),
+            Definition::Array(element) => todo!(),
+            Definition::Object(fields) => todo!(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Getters)]
+pub struct Primitive {
+    kind: Kind,
+    format: Option<Format>,
+    constraints: Vec<Constraint>,
+}
+
+impl Primitive {
+    fn constrained_by(self: &mut Self, annotations: &ParameterAnnotations) {
+        for constraint in &annotations.constraints {
+            self.constraints.push(constraint.clone())
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Constraint {
+    Maximum(usize),
+    Minimum(usize),
+}
+
+#[derive(Debug, Clone, Getters)]
+pub struct Field {
+    name: String,
+    definition: ReferenceOr<Schema, Definition>,
+    required: bool,
+}
+
+impl Field {
+    fn new(name: String, definition: ReferenceOr<Schema, Definition>, required: bool) -> Self {
+        Field {
+            name,
+            definition,
+            required,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum Kind {
+    String,
+    Number,
+    Integer,
+    Boolean,
+}
+
+#[derive(Debug, Clone)]
+pub enum Format {
+    Date,
+    DateTime,
+    Password,
+    Byte,
+    Binary,
+    Custom(String),
+}
+
+#[derive(Debug, Clone, Getters)]
+pub struct Api {
+    name: String,
+    version: String,
+    paths: IndexMap<String, Path>,
+}
+
+#[derive(Debug, Clone, Getters)]
+pub struct Path {
+    endpoints: IndexMap<HttpMethod, Endpoint>,
+}
+
+#[derive(Debug, Clone, Getters)]
+pub struct Endpoint {
+    operation_id: String,
+    parameters: Vec<Parameter>,
+    responses: IndexMap<u16, Responses>,
+}
+
+#[derive(Debug, Clone, Getters)]
+pub struct Parameter {
+    name: String,
+    kind: Definition,
+    location: ParameterLocation,
+    constraints: Vec<Constraint>,
+}
+
+impl Parameter {
+    fn new<S>(identifier: S, kind: Definition, annotations: ParameterAnnotations) -> Parameter
+    where
+        S: AsRef<str>,
+    {
+        Parameter {
+            name: identifier.as_ref().to_string(),
+            location: annotations.parameter_type,
+            constraints: annotations.constraints,
+            kind,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum ParameterLocation {
+    Query,
+    Path,
+    Header,
+    Cookie,
+}
+
+pub type Responses = IndexMap<MediaTypeBuf, Definition>;
+pub type HttpCode = u16;
+
+#[derive(Debug, Clone, Hash, PartialEq, Eq)]
+pub enum HttpMethod {
+    Get,
+    Put,
+    Post,
+    Patch,
+    Delete,
 }
 
 impl ApiScript {
@@ -32,22 +194,26 @@ impl ApiScript {
 
         for pair in tree.into_inner() {
             match pair.as_rule() {
-                Rule::Schema => api_script.schemas.push(api_script.schema(pair)?),
+                Rule::Schema => api_script.push_schema(api_script.schema(pair)?),
                 Rule::Api => api_script.apis.push(api_script.api(pair)?),
-                Rule::Type => api_script.schemas.push(api_script.kind(pair)?),
+                Rule::Type => api_script.push_schema(api_script.kind(pair)?),
                 _ => (),
             }
         }
         return Ok(api_script);
     }
 
+    fn push_schema(&mut self, schema: Schema) {
+        self.schemas.push(Rc::new(schema));
+    }
+
     fn kind(&self, kind: Node) -> Result<Schema> {
         let mut nodes = kind.into_inner();
         let identifier = nodes.next().unwrap().as_str();
-        let definition = self.type_def(nodes.next().unwrap())?;
+        let definition = self.parse_schema(nodes.next().unwrap())?;
         return Ok(Schema {
             identifier: identifier.to_string(),
-            schema_definition: definition,
+            definition,
         });
     }
 
@@ -128,7 +294,7 @@ impl ApiScript {
         let annotations =
             ParameterAnnotations::process(iter.expect_next_token(Rule::Annotations)?)?;
         let identifier = iter.expect_next_token(Rule::Identifier)?;
-        let mut schema = self.type_def(iter.expect_next_token(Rule::SchemaDefinition)?)?;
+        let mut schema = self.parse_schema(iter.expect_next_token(Rule::SchemaDefinition)?)?;
         // TODO apply annotations at type creaton? create new types when existing types are
         // referenced with annotations?
         schema.constrained_by(&annotations);
@@ -144,7 +310,7 @@ impl ApiScript {
         let mut inners = response.into_inner();
 
         let http_code: u16 = inners.expect_next_token(Rule::HttpCode)?.as_str().parse()?;
-        let type_def = self.type_def(inners.expect_next_token(Rule::SchemaDefinition)?)?;
+        let type_def = self.parse_schema(inners.expect_next_token(Rule::SchemaDefinition)?)?;
 
         return Ok((
             http_code,
@@ -157,87 +323,81 @@ impl ApiScript {
     fn schema(&self, schema: Node) -> Result<Schema> {
         let mut inners = schema.into_inner().into_iter();
         let identificator = inners.next().unwrap().as_str();
-        let schema_definition = self.schema_definition(inners.next().unwrap())?;
-        return Ok(Schema {
-            identifier: identificator.to_owned(),
-            schema_definition,
-        });
+        let definition = {
+            let schema_definition = inners.next().unwrap();
+            if schema_definition.as_rule() == Rule::Fields {
+                let inners = schema_definition.into_inner();
+                let fields = self.parse_fields(inners)?;
+                Definition::Object(fields)
+            } else {
+                bail!("{identificator} was not an object");
+            }
+        };
+
+        return Ok(Schema::new(identificator.to_owned(), definition));
     }
 
-    fn schema_definition(&self, schema_definition: Node) -> Result<Definition> {
-        if schema_definition.as_rule() == Rule::Fields {
-            let inners = schema_definition.into_inner();
-            let fields = self.fields(inners)?;
-            return Ok(Definition::Object { fields });
-        } else {
-            //print!("{:#?}", inner);
-            unimplemented!()
-        }
-    }
-
-    fn type_def(&self, node: Node) -> Result<Definition> {
+    fn parse_schema(&self, node: Node) -> Result<Definition> {
         let mut inners = node.into_inner().into_iter();
         let name = inners.next().unwrap();
-        let schema = self.parse_type(name)?;
+        let schema = self.parse_definition(name)?;
         return Ok(schema);
     }
 
-    fn parse_type(&self, node: Node) -> Result<Definition> {
-        if let Rule::SchemaDefinition = node.as_rule() {
-            return self.type_def(node);
-        }
-        if let Rule::List = node.as_rule() {
-            // TODO allow declaring types in lists?
-            let name = node
-                .into_inner()
-                .expect_next_token(Rule::SchemaDefinition)?
-                .into_inner()
-                .expect_next_token(Rule::Identifier)?;
-            let ident: &str = &self.find_schema(name.as_str())?.identifier;
-            let reference = Definition::Reference { name: ident.into() };
-            return Ok(Definition::Array {
-                schema: Rc::new(reference),
-            });
-        }
-        if let Rule::Identifier = node.as_rule() {
-            let schema = self.find_schema(node.as_str())?;
-            return Ok(schema.into());
-        }
-        if let Rule::Primitive = node.as_rule() {
-            let primitive = ApiScript::primitive(node)?;
-
-            return Ok(Definition::Primitive(Basic {
-                privitive: primitive,
-                format: None,
-                constraints: Vec::new(),
-            }));
-        }
-
-        bail!("Could not determine type")
+    fn parse_reference_or_definition(&self, node: Node) -> Result<ReferenceOr<Schema, Definition>> {
+        let definition = if let Rule::Identifier = node.as_rule() {
+            let identifier = node.as_str();
+            let schema = self.find_schema(identifier)?;
+            ReferenceOr::Reference(schema)
+        } else {
+            let definition = self.parse_definition(node)?;
+            ReferenceOr::Actual(definition)
+        };
+        return Ok(definition);
     }
 
-    fn find_schema(&self, identificator: &str) -> Result<&Schema> {
+    fn parse_definition(&self, node: Node) -> Result<Definition> {
+        let definition = match node.as_rule() {
+            Rule::SchemaDefinition => return self.parse_schema(node),
+            Rule::List => {
+                // TODO allow declaring types in lists?
+                let name = node
+                    .into_inner()
+                    .expect_next_token(Rule::SchemaDefinition)?
+                    .into_inner()
+                    .expect_next_token(Rule::Identifier)?;
+                let schema = self.find_schema(name.as_str())?;
+                Definition::array(schema)
+            }
+            Rule::Primitive => {
+                let primitive = ApiScript::primitive(node)?;
+                Definition::primitive(primitive, None, Vec::new())
+            }
+            _ => bail!("Could not determine type"),
+        };
+        return Ok(definition);
+    }
+
+    fn find_schema(&self, identificator: &str) -> Result<Rc<Schema>> {
         let schema = self
             .schemas
             .iter()
             .find(|schema| schema.identifier == identificator);
-        if schema.is_none() {
+        if let Some(schema) = schema {
+            return Ok(schema.to_owned());
+        } else {
             bail!("{identificator} is not a kown type");
         }
-        return Ok(schema.unwrap());
     }
 
-    fn fields(&self, nodes: Nodes) -> Result<Vec<Field>> {
+    fn parse_fields(&self, nodes: Nodes) -> Result<Vec<Field>> {
         let mut fields = Vec::<Field>::new();
         for node in nodes {
             let inners = node.into_inner();
             let required = inners.len() == 2;
             for (property, kind) in inners.tuples() {
-                fields.push(Field::new(
-                    property.as_str().into(),
-                    self.type_def(kind)?,
-                    required,
-                ));
+                let kind = self.parse_reference_or_definition(kind)?;
+                fields.push(Field::new(property.as_str().into(), kind, required));
             }
         }
         return Ok(fields);
@@ -255,12 +415,12 @@ impl ApiScript {
         }
     }
 
-    fn primitive(primitive: Node) -> Result<Primitive> {
+    fn primitive(primitive: Node) -> Result<Kind> {
         match primitive.as_str() {
-            "string" => Ok(Primitive::String),
-            "number" => Ok(Primitive::Number),
-            "integer" => Ok(Primitive::Integer),
-            "boolean" => Ok(Primitive::Boolean),
+            "string" => Ok(Kind::String),
+            "number" => Ok(Kind::Number),
+            "integer" => Ok(Kind::Integer),
+            "boolean" => Ok(Kind::Boolean),
             _ => bail!("{primitive} was not a Primitive"),
         }
     }
@@ -268,7 +428,7 @@ impl ApiScript {
 
 #[derive(Debug, Clone)]
 struct ParameterAnnotations {
-    parameter_type: ParameterType,
+    parameter_type: ParameterLocation,
     constraints: Vec<Constraint>,
 }
 
@@ -281,8 +441,8 @@ impl ParameterAnnotations {
             let mut tokens = annotation.into_inner();
             let identifier = tokens.expect_next_token(Rule::Identifier)?;
             match identifier.as_str() {
-                "Path" => parameter_type = Some(ParameterType::Path),
-                "Query" => parameter_type = Some(ParameterType::Query),
+                "Path" => parameter_type = Some(ParameterLocation::Path),
+                "Query" => parameter_type = Some(ParameterLocation::Query),
                 "Max" => {
                     let max = tokens
                         .expect_next_token(Rule::NumberValue)?
@@ -295,161 +455,10 @@ impl ParameterAnnotations {
         }
 
         return Ok(ParameterAnnotations {
-            parameter_type: parameter_type.unwrap_or(ParameterType::Query),
+            parameter_type: parameter_type.unwrap_or(ParameterLocation::Query),
             constraints,
         });
     }
-}
-
-#[derive(Debug, Clone)]
-pub struct Schema {
-    pub identifier: String,
-    pub schema_definition: Definition,
-}
-
-impl Into<Definition> for &Schema {
-    fn into(self) -> Definition {
-        return Definition::Reference {
-            name: self.identifier.clone(),
-        };
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum Definition {
-    Primitive(Basic),
-    Array { schema: Rc<Definition> },
-    Object { fields: Vec<Field> },
-    // TODO move into ReferenceOr type like openapiv3
-    Reference { name: String },
-}
-
-impl Definition {
-    fn constrained_by(self: &mut Self, annotations: &ParameterAnnotations) {
-        match self {
-            Definition::Primitive(basic) => basic.constrained_by(annotations),
-            Definition::Array { schema } => todo!(),
-            Definition::Object { fields } => todo!(),
-            Definition::Reference { name } => todo!(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Getters)]
-pub struct Basic {
-    privitive: Primitive,
-    format: Option<Format>,
-    constraints: Vec<Constraint>,
-}
-
-impl Basic {
-    fn constrained_by(self: &mut Self, annotations: &ParameterAnnotations) {
-        for constraint in &annotations.constraints {
-            self.constraints.push(constraint.clone())
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum Constraint {
-    Maximum(usize),
-    Minimum(usize),
-}
-
-#[derive(Debug, Clone, Getters)]
-pub struct Field {
-    name: String,
-    definition: Definition,
-    required: bool,
-}
-
-impl Field {
-    fn new(name: String, definition: Definition, required: bool) -> Self {
-        Field {
-            name,
-            definition,
-            required,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum Primitive {
-    String,
-    Number,
-    Integer,
-    Boolean,
-}
-
-#[derive(Debug, Clone)]
-pub enum Format {
-    Date,
-    DateTime,
-    Password,
-    Byte,
-    Binary,
-    Custom(String),
-}
-
-#[derive(Debug, Clone, Getters)]
-pub struct Api {
-    name: String,
-    version: String,
-    paths: IndexMap<String, Path>,
-}
-
-#[derive(Debug, Clone, Getters)]
-pub struct Path {
-    endpoints: IndexMap<HttpMethod, Endpoint>,
-}
-
-#[derive(Debug, Clone, Getters)]
-pub struct Endpoint {
-    operation_id: String,
-    parameters: Vec<Parameter>,
-    responses: IndexMap<u16, Responses>,
-}
-
-#[derive(Debug, Clone, Getters)]
-pub struct Parameter {
-    name: String,
-    kind: Definition,
-    parameter_type: ParameterType,
-    constraints: Vec<Constraint>,
-}
-
-impl Parameter {
-    fn new<S>(identifier: S, kind: Definition, annotations: ParameterAnnotations) -> Parameter
-    where
-        S: AsRef<str>,
-    {
-        Parameter {
-            name: identifier.as_ref().to_string(),
-            parameter_type: annotations.parameter_type,
-            constraints: annotations.constraints,
-            kind,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub enum ParameterType {
-    Query,
-    Path,
-    Header,
-    Cookie,
-}
-
-pub type Responses = IndexMap<MediaTypeBuf, Definition>;
-pub type HttpCode = u16;
-
-#[derive(Debug, Clone, Hash, PartialEq, Eq)]
-pub enum HttpMethod {
-    Get,
-    Put,
-    Post,
-    Patch,
-    Delete,
 }
 
 impl<'a> Into<HttpMethod> for Node<'a> {
