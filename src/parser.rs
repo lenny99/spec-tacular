@@ -62,8 +62,8 @@ impl Definition {
     fn constrained_by(self: &mut Self, annotations: &ParameterAnnotations) {
         match self {
             Definition::Primitive(basic) => basic.constrained_by(annotations),
-            Definition::Array(element) => todo!(),
-            Definition::Object(fields) => todo!(),
+            Definition::Array(_element) => todo!(),
+            Definition::Object(_fields) => todo!(),
         }
     }
 }
@@ -225,7 +225,7 @@ impl ApiScript {
         let path_nodes = nodes.expect_next_token(Rule::ApiBody)?;
 
         let mut paths: IndexMap<String, Path> = indexmap!();
-        let mut servers: Vec<String> = vec![];
+        let _servers: Vec<String> = vec![];
         for path_node in path_nodes.into_inner() {
             match path_node.as_rule() {
                 Rule::Server => (),

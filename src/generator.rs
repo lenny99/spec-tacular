@@ -1,4 +1,4 @@
-use std::{borrow::Borrow, default, rc::Rc};
+use std::{rc::Rc};
 
 use crate::parser::{
     Api, ApiScript, Constraint, Definition, Endpoint, Field, Format, HttpMethod, Kind,
@@ -8,7 +8,7 @@ use indexmap::{indexmap, IndexMap};
 use mediatype::MediaTypeBuf;
 use openapiv3::{
     Components, Operation, ParameterData, ParameterSchemaOrContent, PathItem, QueryStyle,
-    ReferenceOr, SchemaData, SchemaKind, StatusCode,
+    ReferenceOr, SchemaData, StatusCode,
 };
 
 pub(crate) fn generate(api_script: &ApiScript) -> Vec<openapiv3::OpenAPI> {
@@ -219,7 +219,7 @@ impl Definition {
         for field in fields {
             let definition = field.definition();
             match definition {
-                crate::util::ReferenceOr::Reference(reference) => {
+                crate::util::ReferenceOr::Reference(_reference) => {
                     //let kind = BoxedSchemaReference::Reference(reference);
                     //map.insert(field.name().to_owned(), kind);
                 }
