@@ -1,15 +1,16 @@
 ApiScript = { SOI ~ (Schema | Api | Type)* ~ EOI }
 
 // Types
-Schema           = { "schema" ~ Identifier ~ "{" ~ Fields ~ "}" }
-Type             = { "type" ~ Identifier ~ ":" ~ SchemaDefinition }
-SchemaDefinition = { Primitive ~ ("#" ~ Format)? | List | Identifier }
-Fields           = { Field* }
-Field            = { Identifier ~ ":" ~ SchemaDefinition ~ Optional? }
-Optional         = { "?" }
-List             = { "[" ~ SchemaDefinition ~ "]" }
-Format           = { "date" | "date-time" | "password" | "byte" | "binary" | Identifier }
-Primitive        = { "string" | "number" | "integer" | "boolean" }
+Schema         = { "schema" ~ Identifier ~ "{" ~ Fields ~ "}" }
+Type           = { "type" ~ Identifier ~ ":" ~ TypeDefinition }
+TypeDefinition = { Kind | List | Identifier }
+Kind           = { Primitive ~ ("#" ~ Format)? }
+Fields         = { Field* }
+Field          = { Identifier ~ ":" ~ TypeDefinition ~ Optional? }
+Optional       = { "?" }
+List           = { "[" ~ TypeDefinition ~ "]" }
+Format         = { "date" | "date-time" | "password" | "byte" | "binary" | Identifier }
+Primitive      = { "string" | "number" | "integer" | "boolean" }
 
 // Annotations
 Annotations = { Annotation* }
@@ -17,7 +18,7 @@ Annotation  = { "@" ~ Identifier ~ ("(" ~ Value ~ ")")? }
 
 // Values
 Value       = _{ String | ArrayValue | Identifier | NumberValue }
-ArrayValue  = @{ "[" ~ ((String | SchemaDefinition) ~ ",")* }
+ArrayValue  = @{ "[" ~ ((String | TypeDefinition) ~ ",")* }
 NumberValue = @{ ASCII_DIGIT* }
 
 // Api
@@ -32,9 +33,9 @@ Endpoint    =  { Method ~ OperationId ~ "(" ~ Parameters? ~ ")" ~ "{" ~ Response
 Method      =  { "GET" | "PUT" | "POST" | "DELETE" | "PATCH" }
 OperationId = _{ Identifier }
 Parameters  =  { Parameter ~ ("," ~ Parameter)* }
-Parameter   =  { Annotations ~ Identifier ~ ":" ~ SchemaDefinition }
+Parameter   =  { Annotations ~ Identifier ~ ":" ~ TypeDefinition }
 Responses   =  { Response* }
-Response    =  { HttpCode ~ ":" ~ SchemaDefinition }
+Response    =  { HttpCode ~ ":" ~ TypeDefinition }
 
 // General Patterns
 HttpCode   = @{ ASCII_DIGIT+ }

@@ -1,15 +1,17 @@
-use std::{rc::Rc};
-
-use crate::parser::{
-    Api, ApiScript, Constraint, Definition, Endpoint, Field, Format, HttpMethod, Kind,
-    ParameterLocation, Path, Primitive, Schema,
+use crate::{
+    parser::{
+        Api, ApiScript, Constraint, Definition, Endpoint, Field, Format, HttpMethod, Kind,
+        ParameterLocation, Path, Primitive, Schema,
+    },
+    util::ReferenceOr,
 };
 use indexmap::{indexmap, IndexMap};
 use mediatype::MediaTypeBuf;
 use openapiv3::{
     Components, Operation, ParameterData, ParameterSchemaOrContent, PathItem, QueryStyle,
-    ReferenceOr, SchemaData, StatusCode,
+    SchemaData, StatusCode,
 };
+use std::rc::Rc;
 
 pub(crate) fn generate(api_script: &ApiScript) -> Vec<openapiv3::OpenAPI> {
     return api_script.generate();
@@ -25,16 +27,34 @@ impl ApiScript {
         return apis;
     }
 
-    fn generate_schemas(&self) -> IndexMap<String, ReferenceOr<openapiv3::Schema>> {
-        return self
-            .schemas
-            .iter()
-            .map(Rc::as_ref)
-            .map(Schema::generate)
-            .fold(IndexMap::new(), |mut map, (identificator, schema)| {
-                map.insert(identificator, openapiv3::ReferenceOr::Item(schema));
-                return map;
-            });
+    fn generate_schemas(&self) -> IndexMap<String, openapiv3::ReferenceOr<openapiv3::Schema>> {
+        let mut map: IndexMap<String, ReferenceOrSchema> = indexmap! {};
+        for schema in &self.schemas {
+            let (identifier, ref_or_schema): (String, ReferenceOrSchema) = schema.as_ref().into();
+            map.insert(identifier, ref_or_schema);
+        }
+        return map;
+    }
+}
+
+type ReferenceOrSchema = openapiv3::ReferenceOr<openapiv3::Schema>;
+
+impl Into<(String, ReferenceOrSchema)> for &Schema {
+    fn into(self) -> (String, ReferenceOrSchema) {
+        return (self.identifier.to_owned(), (&self.definition).into());
+    }
+}
+
+impl Into<ReferenceOrSchema> for &ReferenceOr<Schema, Definition> {
+    fn into(self) -> ReferenceOrSchema {
+        match self {
+            ReferenceOr::Reference(reference) => {
+                let name = &reference.as_ref().identifier;
+                let path = format!("#/components/schemas/{name}");
+                return ReferenceOrSchema::Reference { reference: path };
+            }
+            ReferenceOr::Actual(definition) => openapiv3::ReferenceOr::Item(definition.into()),
+        }
     }
 }
 
@@ -51,10 +71,10 @@ impl Api {
     }
 
     fn generate_paths(&self) -> openapiv3::Paths {
-        let mut paths: IndexMap<String, ReferenceOr<PathItem>> = indexmap!();
+        let mut paths: IndexMap<String, openapiv3::ReferenceOr<PathItem>> = indexmap!();
         for (url, path) in self.paths().iter() {
             let path = path.generate();
-            paths.insert(url.into(), ReferenceOr::Item(path));
+            paths.insert(url.into(), openapiv3::ReferenceOr::Item(path));
         }
 
         return openapiv3::Paths {
@@ -88,7 +108,7 @@ impl Endpoint {
         };
     }
 
-    fn openapi_parameters(&self) -> Vec<ReferenceOr<openapiv3::Parameter>> {
+    fn openapi_parameters(&self) -> Vec<openapiv3::ReferenceOr<openapiv3::Parameter>> {
         let mut result = vec![];
 
         for parameter in self.parameters() {
@@ -106,7 +126,7 @@ impl Endpoint {
                 ParameterLocation::Header => todo!(),
                 ParameterLocation::Cookie => todo!(),
             };
-            result.push(ReferenceOr::Item(parameter));
+            result.push(openapiv3::ReferenceOr::Item(parameter));
         }
 
         return result;
@@ -119,7 +139,10 @@ impl Endpoint {
                 content: Endpoint::to_content(media_responses),
                 ..Default::default()
             };
-            responses.insert(StatusCode::Code(*http_code), ReferenceOr::Item(response));
+            responses.insert(
+                StatusCode::Code(*http_code),
+                openapiv3::ReferenceOr::Item(response),
+            );
         }
 
         return openapiv3::Responses {
@@ -129,18 +152,15 @@ impl Endpoint {
     }
 
     fn to_content(
-        map: &IndexMap<MediaTypeBuf, Definition>,
+        map: &IndexMap<MediaTypeBuf, ReferenceOr<Schema, Definition>>,
     ) -> IndexMap<String, openapiv3::MediaType> {
         let mut result = indexmap!();
         for (media_type, definition) in map {
-            let schema = openapiv3::Schema {
-                schema_kind: definition.into(),
-                schema_data: SchemaData::default(),
-            };
+            let schema = definition.into();
             result.insert(
                 media_type.to_string(),
                 openapiv3::MediaType {
-                    schema: Option::Some(ReferenceOr::Item(schema)),
+                    schema: Option::Some(schema),
                     ..Default::default()
                 },
             );
@@ -149,9 +169,9 @@ impl Endpoint {
     }
 }
 
-impl Into<openapiv3::ParameterSchemaOrContent> for &Definition {
+impl Into<openapiv3::ParameterSchemaOrContent> for &ReferenceOr<Schema, Definition> {
     fn into(self) -> openapiv3::ParameterSchemaOrContent {
-        let schema = openapiv3::ReferenceOr::Item(self.into());
+        let schema: ReferenceOrSchema = self.into();
         return openapiv3::ParameterSchemaOrContent::Schema(schema);
     }
 }
@@ -164,7 +184,10 @@ impl Into<openapiv3::Responses> for Endpoint {
                 content: Endpoint::to_content(media_responses),
                 ..Default::default()
             };
-            responses.insert(StatusCode::Code(*http_code), ReferenceOr::Item(response));
+            responses.insert(
+                StatusCode::Code(*http_code),
+                openapiv3::ReferenceOr::Item(response),
+            );
         }
 
         return openapiv3::Responses {
@@ -174,40 +197,47 @@ impl Into<openapiv3::Responses> for Endpoint {
     }
 }
 
-impl Schema {
-    fn generate(&self) -> (String, openapiv3::Schema) {
-        let schema = (&self.definition).into();
-        return (self.identifier.to_owned(), schema);
+impl Into<openapiv3::Schema> for Definition {
+    fn into(self) -> openapiv3::Schema {
+        return (&self).into();
     }
 }
-
-type ReferenceOrSchemaKind = openapiv3::ReferenceOr<openapiv3::SchemaKind>;
 
 impl Into<openapiv3::Schema> for &Definition {
     fn into(self) -> openapiv3::Schema {
         match &self {
-            Definition::Primitive(basic) => {
-                return openapiv3::Schema {
-                    schema_kind: basic.into(),
-                    schema_data: openapiv3::SchemaData::default(),
-                };
-            }
-            Definition::Object(fields) => {
-                return openapiv3::Schema {
-                    schema_data: openapiv3::SchemaData {
+            Definition::Primitive(basic) => openapiv3::Schema {
+                schema_kind: basic.into(),
+                schema_data: openapiv3::SchemaData::default(),
+            },
+            Definition::Object(fields) => openapiv3::Schema {
+                schema_data: openapiv3::SchemaData {
+                    ..Default::default()
+                },
+                schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::Object(
+                    openapiv3::ObjectType {
+                        properties: Definition::properties(fields),
+                        required: Definition::required_properties(fields),
                         ..Default::default()
                     },
-                    schema_kind: openapiv3::SchemaKind::Type(openapiv3::Type::Object(
-                        openapiv3::ObjectType {
-                            properties: Definition::properties(fields),
-                            required: Definition::required_properties(fields),
-                            ..Default::default()
-                        },
-                    )),
+                )),
+            },
+            Definition::Array(array) => {
+                let path = format!("#/components/schemas/{}", array.identifier);
+                let reference = BoxedSchemaReference::Reference { reference: path };
+                let array_type = openapiv3::ArrayType {
+                    items: Option::Some(reference),
+                    max_items: None,
+                    min_items: None,
+                    unique_items: false,
+                };
+                let schema_kind = openapiv3::Type::Array(array_type);
+                openapiv3::Schema {
+                    schema_kind: openapiv3::SchemaKind::Type(schema_kind),
+                    schema_data: SchemaData::default(),
                 }
             }
-            _ => todo!(),
-        };
+        }
     }
 }
 
@@ -219,15 +249,15 @@ impl Definition {
         for field in fields {
             let definition = field.definition();
             match definition {
-                crate::util::ReferenceOr::Reference(_reference) => {
+                ReferenceOr::Reference(_reference) => {
                     //let kind = BoxedSchemaReference::Reference(reference);
                     //map.insert(field.name().to_owned(), kind);
                 }
-                crate::util::ReferenceOr::Actual(schema) => {
-                    let oschema: openapiv3::Schema = schema.into();
+                ReferenceOr::Actual(definition) => {
+                    let schema: openapiv3::Schema = definition.into();
                     map.insert(
                         field.name().to_owned(),
-                        BoxedSchemaReference::Item(Box::new(oschema)),
+                        BoxedSchemaReference::Item(Box::new(schema)),
                     );
                 }
             }
@@ -244,20 +274,7 @@ impl Definition {
     }
 }
 
-type BoxedSchemaReference = ReferenceOr<Box<openapiv3::Schema>>;
-
-impl Into<ReferenceOrSchemaKind> for crate::util::ReferenceOr<Schema, Schema> {
-    fn into(self) -> ReferenceOrSchemaKind {
-        match self {
-            crate::util::ReferenceOr::Reference(reference) => {
-                let name = &reference.as_ref().identifier;
-                let path = format!("#/components/schemas/{name}");
-                return ReferenceOrSchemaKind::Reference { reference: path };
-            }
-            crate::util::ReferenceOr::Actual(actual) => ReferenceOr::Item(actual.definition.into()),
-        }
-    }
-}
+type BoxedSchemaReference = openapiv3::ReferenceOr<Box<openapiv3::Schema>>;
 
 impl Into<openapiv3::SchemaKind> for Definition {
     fn into(self) -> openapiv3::SchemaKind {
@@ -265,6 +282,7 @@ impl Into<openapiv3::SchemaKind> for Definition {
     }
 }
 
+// TODO weg?
 impl Into<openapiv3::SchemaKind> for &Definition {
     fn into(self) -> openapiv3::SchemaKind {
         match self {
@@ -284,7 +302,7 @@ impl Into<openapiv3::SchemaKind> for &Definition {
                 let schema_type = openapiv3::SchemaKind::Type(schema_kind);
                 return schema_type;
             }
-            Definition::Object(_) => todo!(),
+            Definition::Object(_) => todo!("no objects!"),
         };
     }
 }

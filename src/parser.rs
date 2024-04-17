@@ -6,7 +6,7 @@ use mediatype::{
     MediaTypeBuf,
 };
 use pest::Parser;
-use std::{rc::Rc, vec};
+use std::rc::Rc;
 
 use crate::util::*;
 
@@ -27,11 +27,11 @@ pub struct ApiScript {
 #[derive(Debug, Clone)]
 pub struct Schema {
     pub identifier: String,
-    pub definition: Definition,
+    pub definition: ReferenceOr<Schema, Definition>,
 }
 
 impl Schema {
-    fn new(identifier: String, definition: Definition) -> Schema {
+    fn new(identifier: String, definition: ReferenceOr<Schema, Definition>) -> Schema {
         return Schema {
             identifier,
             definition,
@@ -47,18 +47,6 @@ pub enum Definition {
 }
 
 impl Definition {
-    fn primitive(kind: Kind, format: Option<Format>, constraints: Vec<Constraint>) -> Definition {
-        return Definition::Primitive(Primitive {
-            kind,
-            format,
-            constraints,
-        });
-    }
-
-    fn array(definition: Rc<Schema>) -> Definition {
-        return Definition::Array(definition);
-    }
-
     fn constrained_by(self: &mut Self, annotations: &ParameterAnnotations) {
         match self {
             Definition::Primitive(basic) => basic.constrained_by(annotations),
@@ -146,13 +134,17 @@ pub struct Endpoint {
 #[derive(Debug, Clone, Getters)]
 pub struct Parameter {
     name: String,
-    kind: Definition,
+    kind: ReferenceOr<Schema, Definition>,
     location: ParameterLocation,
     constraints: Vec<Constraint>,
 }
 
 impl Parameter {
-    fn new<S>(identifier: S, kind: Definition, annotations: ParameterAnnotations) -> Parameter
+    fn new<S>(
+        identifier: S,
+        kind: ReferenceOr<Schema, Definition>,
+        annotations: ParameterAnnotations,
+    ) -> Parameter
     where
         S: AsRef<str>,
     {
@@ -173,7 +165,7 @@ pub enum ParameterLocation {
     Cookie,
 }
 
-pub type Responses = IndexMap<MediaTypeBuf, Definition>;
+pub type Responses = IndexMap<MediaTypeBuf, ReferenceOr<Schema, Definition>>;
 pub type HttpCode = u16;
 
 #[derive(Debug, Clone, Hash, PartialEq, Eq)]
@@ -194,9 +186,9 @@ impl ApiScript {
 
         for pair in tree.into_inner() {
             match pair.as_rule() {
-                Rule::Schema => api_script.push_schema(api_script.schema(pair)?),
-                Rule::Api => api_script.apis.push(api_script.api(pair)?),
-                Rule::Type => api_script.push_schema(api_script.kind(pair)?),
+                Rule::Schema => api_script.push_schema(api_script.parse_schema(pair)?),
+                Rule::Api => api_script.apis.push(api_script.parse_api(pair)?),
+                Rule::Type => api_script.push_schema(api_script.parse_kind(pair)?),
                 _ => (),
             }
         }
@@ -207,17 +199,18 @@ impl ApiScript {
         self.schemas.push(Rc::new(schema));
     }
 
-    fn kind(&self, kind: Node) -> Result<Schema> {
+    fn parse_kind(&self, kind: Node) -> Result<Schema> {
         let mut nodes = kind.into_inner();
-        let identifier = nodes.next().unwrap().as_str();
-        let definition = self.parse_schema(nodes.next().unwrap())?;
+        let identifier = nodes.expect_next_token(Rule::Identifier)?.as_str();
+        let definition =
+            self.parse_type_definition(nodes.next().expect_token(Rule::TypeDefinition)?)?;
         return Ok(Schema {
             identifier: identifier.to_string(),
             definition,
         });
     }
 
-    fn api(&self, api: Node) -> Result<Api> {
+    fn parse_api(&self, api: Node) -> Result<Api> {
         let mut nodes = api.into_inner();
         let _ = nodes.expect_next_token(Rule::Annotations)?;
         let identifier = nodes.expect_next_token(Rule::Identifier)?.as_str();
@@ -230,7 +223,7 @@ impl ApiScript {
             match path_node.as_rule() {
                 Rule::Server => (),
                 Rule::ApiPath => {
-                    let (url, path) = self.path(path_node)?;
+                    let (url, path) = self.parse_path(path_node)?;
                     paths.insert(url, path);
                 }
                 _ => (),
@@ -244,7 +237,7 @@ impl ApiScript {
         });
     }
 
-    fn path(&self, path: Node) -> Result<(String, Path)> {
+    fn parse_path(&self, path: Node) -> Result<(String, Path)> {
         let mut inners = path.into_inner();
         let url_path = inners
             .next()
@@ -254,14 +247,14 @@ impl ApiScript {
 
         let mut endpoints: IndexMap<HttpMethod, Endpoint> = indexmap!();
         for endpoint_node in endpoint_nodes.into_inner() {
-            let (method, endpoint) = self.endpoint(endpoint_node)?;
+            let (method, endpoint) = self.parse_endpoint(endpoint_node)?;
             endpoints.insert(method, endpoint);
         }
 
         return Ok((url_path.into(), Path { endpoints }));
     }
 
-    fn endpoint(&self, endpoint: Node) -> Result<(HttpMethod, Endpoint)> {
+    fn parse_endpoint(&self, endpoint: Node) -> Result<(HttpMethod, Endpoint)> {
         let mut inners = endpoint.into_inner();
         let method: HttpMethod = inners.expect_next_token(Rule::Method)?.into();
         let operation_id = inners.expect_next_token(Rule::Identifier)?.as_str();
@@ -269,13 +262,13 @@ impl ApiScript {
         let parameter_node = inners.expect_next_token(Rule::Parameters)?;
         let mut parameters = vec![];
         for node in parameter_node.into_inner() {
-            parameters.push(self.parameter(node)?);
+            parameters.push(self.parse_parameter(node)?);
         }
 
         let respone_nodes = inners.expect_next_token(Rule::Responses)?;
         let mut responses: IndexMap<u16, Responses> = indexmap!();
         for response_node in respone_nodes.into_inner() {
-            let (http, response) = self.response(response_node)?;
+            let (http, response) = self.parse_response(response_node)?;
             responses.insert(http, response);
         }
 
@@ -289,28 +282,29 @@ impl ApiScript {
         ));
     }
 
-    fn parameter(&self, parameter: Node) -> Result<Parameter> {
+    fn parse_parameter(&self, parameter: Node) -> Result<Parameter> {
         let mut iter = parameter.into_inner();
         let annotations =
             ParameterAnnotations::process(iter.expect_next_token(Rule::Annotations)?)?;
         let identifier = iter.expect_next_token(Rule::Identifier)?;
-        let mut schema = self.parse_schema(iter.expect_next_token(Rule::SchemaDefinition)?)?;
+        let mut kind = self.parse_type_definition(iter.expect_next_token(Rule::TypeDefinition)?)?;
         // TODO apply annotations at type creaton? create new types when existing types are
         // referenced with annotations?
-        schema.constrained_by(&annotations);
+        // TODO kind.constrained_by(&annotations);
         return Ok(Parameter::new(
             identifier.as_str().to_string(),
-            schema,
+            kind,
             annotations,
         ));
     }
 
-    fn response(&self, response: Node) -> Result<(HttpCode, Responses)> {
+    fn parse_response(&self, response: Node) -> Result<(HttpCode, Responses)> {
         assert!(response.as_rule() == Rule::Response);
         let mut inners = response.into_inner();
 
         let http_code: u16 = inners.expect_next_token(Rule::HttpCode)?.as_str().parse()?;
-        let type_def = self.parse_schema(inners.expect_next_token(Rule::SchemaDefinition)?)?;
+        let type_def =
+            self.parse_type_definition(inners.expect_next_token(Rule::TypeDefinition)?)?;
 
         return Ok((
             http_code,
@@ -320,7 +314,7 @@ impl ApiScript {
         ));
     }
 
-    fn schema(&self, schema: Node) -> Result<Schema> {
+    fn parse_schema(&self, schema: Node) -> Result<Schema> {
         let mut inners = schema.into_inner().into_iter();
         let identificator = inners.next().unwrap().as_str();
         let definition = {
@@ -333,49 +327,63 @@ impl ApiScript {
                 bail!("{identificator} was not an object");
             }
         };
-
-        return Ok(Schema::new(identificator.to_owned(), definition));
+        return Ok(Schema::new(
+            identificator.to_owned(),
+            ReferenceOr::Actual(definition),
+        ));
     }
 
-    fn parse_schema(&self, node: Node) -> Result<Definition> {
-        let mut inners = node.into_inner().into_iter();
-        let name = inners.next().unwrap();
-        let schema = self.parse_definition(name)?;
-        return Ok(schema);
-    }
-
-    fn parse_reference_or_definition(&self, node: Node) -> Result<ReferenceOr<Schema, Definition>> {
+    fn parse_type_definition(&self, mut node: Node) -> Result<ReferenceOr<Schema, Definition>> {
+        assert!(node.as_rule() == Rule::TypeDefinition);
+        println!("{:#?}", node);
+        node = node.into_inner().next().unwrap();
         let definition = if let Rule::Identifier = node.as_rule() {
             let identifier = node.as_str();
             let schema = self.find_schema(identifier)?;
             ReferenceOr::Reference(schema)
         } else {
+            print!("{:#?}", node);
             let definition = self.parse_definition(node)?;
             ReferenceOr::Actual(definition)
         };
         return Ok(definition);
     }
 
-    fn parse_definition(&self, node: Node) -> Result<Definition> {
+    fn parse_definition(&self, mut node: Node) -> Result<Definition> {
         let definition = match node.as_rule() {
-            Rule::SchemaDefinition => return self.parse_schema(node),
             Rule::List => {
                 // TODO allow declaring types in lists?
                 let name = node
                     .into_inner()
-                    .expect_next_token(Rule::SchemaDefinition)?
+                    .expect_next_token(Rule::TypeDefinition)?
                     .into_inner()
                     .expect_next_token(Rule::Identifier)?;
                 let schema = self.find_schema(name.as_str())?;
-                Definition::array(schema)
+                Definition::Array(schema)
             }
-            Rule::Primitive => {
-                let primitive = ApiScript::primitive(node)?;
-                Definition::primitive(primitive, None, Vec::new())
+            Rule::Kind => Definition::Primitive(self.parse_primitive(node)?),
+            //Rule::Identifier => return self.parse_reference_or_definition(node),
+            _ => {
+                panic!("{:#?}", node);
             }
-            _ => bail!("Could not determine type"),
         };
         return Ok(definition);
+    }
+
+    fn parse_primitive(&self, node: Node) -> Result<Primitive> {
+        let mut tokens = node.into_inner();
+        let kind = kind(tokens.expect_next_token(Rule::Primitive)?)?;
+        let format = if let Some(token) = tokens.next() {
+            assert!(token.as_rule() == Rule::Format);
+            Some(format(token))
+        } else {
+            None
+        };
+        return Ok(Primitive {
+            kind,
+            format,
+            constraints: Vec::new(),
+        });
     }
 
     fn find_schema(&self, identificator: &str) -> Result<Rc<Schema>> {
@@ -396,33 +404,33 @@ impl ApiScript {
             let inners = node.into_inner();
             let required = inners.len() == 2;
             for (property, kind) in inners.tuples() {
-                let kind = self.parse_reference_or_definition(kind)?;
+                let kind = self.parse_type_definition(kind)?;
                 fields.push(Field::new(property.as_str().into(), kind, required));
             }
         }
         return Ok(fields);
     }
+}
 
-    fn format(format: Node) -> Format {
-        let format_string = format.as_str();
-        match format_string {
-            "date" => Format::Date,
-            "date-time" => Format::DateTime,
-            "password" => Format::Password,
-            "byte" => Format::Byte,
-            "binary" => Format::Binary,
-            _ => Format::Custom(format_string.to_owned()),
-        }
+fn format(format: Node) -> Format {
+    assert!(format.as_rule() == Rule::Format);
+    match format.as_str() {
+        "date" => Format::Date,
+        "date-time" => Format::DateTime,
+        "password" => Format::Password,
+        "byte" => Format::Byte,
+        "binary" => Format::Binary,
+        _ => Format::Custom(format.as_str().to_owned()),
     }
+}
 
-    fn primitive(primitive: Node) -> Result<Kind> {
-        match primitive.as_str() {
-            "string" => Ok(Kind::String),
-            "number" => Ok(Kind::Number),
-            "integer" => Ok(Kind::Integer),
-            "boolean" => Ok(Kind::Boolean),
-            _ => bail!("{primitive} was not a Primitive"),
-        }
+fn kind(primitive: Node) -> Result<Kind> {
+    match primitive.as_str() {
+        "string" => Ok(Kind::String),
+        "number" => Ok(Kind::Number),
+        "integer" => Ok(Kind::Integer),
+        "boolean" => Ok(Kind::Boolean),
+        _ => bail!("{primitive} was not a Primitive"),
     }
 }
 
