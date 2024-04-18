@@ -19,7 +19,7 @@ schema Problem {
   description: string
 }
 
-api ContainerApi "0.0.1" {
+api "container-api" "0.0.1" {
   path "/containers" {
     GET listContainers(@Query @Max(100) limit: integer) {
       200: Container

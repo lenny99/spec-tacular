@@ -11,7 +11,6 @@ use openapiv3::{
     Components, Operation, ParameterData, ParameterSchemaOrContent, PathItem, QueryStyle,
     SchemaData, StatusCode,
 };
-use std::rc::Rc;
 
 pub(crate) fn generate(api_script: &ApiScript) -> Vec<openapiv3::OpenAPI> {
     return api_script.generate();
@@ -275,37 +274,6 @@ impl Definition {
 }
 
 type BoxedSchemaReference = openapiv3::ReferenceOr<Box<openapiv3::Schema>>;
-
-impl Into<openapiv3::SchemaKind> for Definition {
-    fn into(self) -> openapiv3::SchemaKind {
-        return (&self).into();
-    }
-}
-
-// TODO weg?
-impl Into<openapiv3::SchemaKind> for &Definition {
-    fn into(self) -> openapiv3::SchemaKind {
-        match self {
-            Definition::Primitive(primitive) => {
-                return primitive.into();
-            }
-            Definition::Array(schema) => {
-                let path = format!("#/components/schemas/{}", schema.identifier);
-                let reference = BoxedSchemaReference::Reference { reference: path };
-                let array_type = openapiv3::ArrayType {
-                    items: Option::Some(reference),
-                    max_items: None,
-                    min_items: None,
-                    unique_items: false,
-                };
-                let schema_kind = openapiv3::Type::Array(array_type);
-                let schema_type = openapiv3::SchemaKind::Type(schema_kind);
-                return schema_type;
-            }
-            Definition::Object(_) => todo!("no objects!"),
-        };
-    }
-}
 
 impl Into<openapiv3::SchemaKind> for &Primitive {
     fn into(self) -> openapiv3::SchemaKind {

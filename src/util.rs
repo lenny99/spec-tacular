@@ -9,65 +9,59 @@ use pest::{
 pub type Node<'a> = Pair<'a, Rule>;
 pub type Nodes<'a> = Pairs<'a, Rule>;
 
-pub trait ExpectToken<'i> {
-    fn expect_token(self, expected: Rule) -> Result<Node<'i>, ParseError>;
+pub trait ExpectToken<'tok> {
+    fn expect_token(self, expected: Rule) -> Result<Node<'tok>, ParseError>;
 }
 
-impl<'i> ExpectToken<'i> for Node<'i> {
-    fn expect_token(self, rule: Rule) -> Result<Node<'i>, ParseError> {
+impl<'tok> ExpectToken<'tok> for Node<'tok> {
+    fn expect_token(self, rule: Rule) -> Result<Node<'tok>, ParseError> {
         if self.as_rule() == rule {
             return Ok(self);
         }
-
-        return Err(ParseError::expected(rule, self.as_rule(), self.as_span()));
+        Err(ParseError::expected(
+            rule,
+            self.as_rule(),
+            self.as_span().to_owned(),
+        ))
     }
 }
 
-impl<'i> ExpectToken<'i> for Option<Node<'i>> {
-    fn expect_token(self, expected: Rule) -> Result<Node<'i>, ParseError> {
+impl<'tok> ExpectToken<'tok> for Option<Node<'tok>> {
+    fn expect_token(self, expected: Rule) -> Result<Node<'tok>, ParseError> {
         return self
             .map(|node| node.expect_token(expected))
             .ok_or(ParseError::none(expected))?;
     }
 }
 
-pub trait ExpectTokens<'i> {
-    fn expect_next_token(&mut self, rule: Rule) -> Result<Node<'i>, ParseError>;
+pub trait ExpectTokens<'tok> {
+    fn expect_next_token(self, rule: Rule) -> Result<Node<'tok>, ParseError>;
 }
 
-impl<'i> ExpectTokens<'i> for Nodes<'i> {
-    fn expect_next_token(&mut self, rule: Rule) -> Result<Node<'i>, ParseError> {
+impl<'tok> ExpectTokens<'tok> for &mut Nodes<'tok> {
+    fn expect_next_token(self, rule: Rule) -> Result<Node<'tok>, ParseError> {
         return self.next().expect_token(rule);
     }
 }
 
 #[derive(Debug)]
 pub struct ParseError {
-    message: String,
+    pub message: String,
+    pub span: Option<(usize, usize)>,
 }
 
 impl ParseError {
-    pub fn new(message: &str) -> Self {
-        Self {
-            message: message.into(),
-        }
-    }
-
     pub fn expected(expected: Rule, found: Rule, at: Span) -> Self {
         Self {
-            message: format!("Expected {expected} but found {found} at {at:?}"),
+            message: format!("Expected {expected} but found {found}"),
+            span: Some((at.start(), at.end())),
         }
     }
 
-    pub fn none(expected: Rule) -> ParseError {
+    pub fn none(expected: Rule) -> Self {
         Self {
             message: format!("Expected {expected} but found none"),
-        }
-    }
-
-    pub fn mismatch(primitive: Rule, as_str: &str) -> ParseError {
-        Self {
-            message: format!("Mismatch: {as_str} is not {primitive}"),
+            span: None,
         }
     }
 }
@@ -79,6 +73,7 @@ impl Display for Rule {
 }
 
 impl Error for ParseError {}
+
 impl Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.message)

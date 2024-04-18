@@ -17,31 +17,34 @@ Annotations = { Annotation* }
 Annotation  = { "@" ~ Identifier ~ ("(" ~ Value ~ ")")? }
 
 // Values
-Value       = _{ String | ArrayValue | Identifier | NumberValue }
-ArrayValue  = @{ "[" ~ ((String | TypeDefinition) ~ ",")* }
-NumberValue = @{ ASCII_DIGIT* }
+Value           = _{ String | ArrayValue | Identifier | StructuredValue | NumberValue }
+ArrayValue      = @{ "[" ~ ((String | TypeDefinition) ~ ",")* }
+NumberValue     = @{ ASCII_DIGIT* }
+StructuredValue =  { "{" ~ ValueField* ~ "}" }
+ValueField      =  { Identifier ~ ":" ~ (String | ArrayValue | Identifier | NumberValue) }
 
 // Api
-Api         =  { Annotations ~ "api" ~ Identifier ~ Version ~ "{" ~ ApiBody ~ "}" }
+Api         =  { Annotations ~ "api" ~ String ~ Version ~ "{" ~ ApiBody ~ "}" }
 ApiBody     =  { (ApiPath | Server)* }
 Server      =  { "server" ~ String ~ ("{" ~ "}")? }
 Version     = _{ String }
 ApiPath     =  { "path" ~ "\"" ~ UrlPath ~ "\"" ~ "{" ~ Endpoints ~ "}" }
 Endpoints   =  { Endpoint* }
 UrlPath     =  { Path }
-Endpoint    =  { Method ~ OperationId ~ "(" ~ Parameters? ~ ")" ~ "{" ~ Responses ~ "}" }
+Endpoint    =  { Annotations ~ Method ~ OperationId ~ "(" ~ Parameters? ~ ")" ~ "{" ~ Responses ~ "}" }
 Method      =  { "GET" | "PUT" | "POST" | "DELETE" | "PATCH" }
 OperationId = _{ Identifier }
 Parameters  =  { Parameter ~ ("," ~ Parameter)* }
-Parameter   =  { Annotations ~ Identifier ~ ":" ~ TypeDefinition }
+Parameter   =  { Annotations ~ Identifier ~ ":" ~ TypeDefinition ~ Optional? }
 Responses   =  { Response* }
-Response    =  { HttpCode ~ ":" ~ TypeDefinition }
+Response    =  { Annotations ~ (HttpCode | "default") ~ ":" ~ TypeDefinition }
 
 // General Patterns
-HttpCode   = @{ ASCII_DIGIT+ }
+HttpCode   = @{ ASCII_DIGIT{3} }
 Path       = @{ (ASCII_ALPHANUMERIC | "/" | "{" | "}")* }
 Identifier = @{ ASCII_ALPHA ~ ASCII_ALPHANUMERIC* }
 String     = @{ "\"" ~ (!("\"") ~ ANY)* ~ "\"" }
 
 // VERSION    = _{ ASCII_ALPHANUMERIC | "." }
 WHITESPACE = _{ " " | NEWLINE }
+COMMENT    = _{ "//" ~ (!NEWLINE ~ ANY)* }

@@ -213,7 +213,7 @@ impl ApiScript {
     fn parse_api(&self, api: Node) -> Result<Api> {
         let mut nodes = api.into_inner();
         let _ = nodes.expect_next_token(Rule::Annotations)?;
-        let identifier = nodes.expect_next_token(Rule::Identifier)?.as_str();
+        let identifier = nodes.expect_next_token(Rule::String)?.as_str();
         let version = nodes.expect_next_token(Rule::String)?.as_str();
         let path_nodes = nodes.expect_next_token(Rule::ApiBody)?;
 
@@ -239,11 +239,8 @@ impl ApiScript {
 
     fn parse_path(&self, path: Node) -> Result<(String, Path)> {
         let mut inners = path.into_inner();
-        let url_path = inners
-            .next()
-            .ok_or(ParseError::new("Expected path"))?
-            .as_str();
-        let endpoint_nodes = inners.next().ok_or(ParseError::new("Expected endpoints"))?;
+        let url_path = inners.expect_next_token(Rule::UrlPath)?.as_str();
+        let endpoint_nodes = inners.expect_next_token(Rule::Endpoints)?;
 
         let mut endpoints: IndexMap<HttpMethod, Endpoint> = indexmap!();
         for endpoint_node in endpoint_nodes.into_inner() {
@@ -256,6 +253,7 @@ impl ApiScript {
 
     fn parse_endpoint(&self, endpoint: Node) -> Result<(HttpMethod, Endpoint)> {
         let mut inners = endpoint.into_inner();
+        let _ = inners.expect_next_token(Rule::Annotations)?;
         let method: HttpMethod = inners.expect_next_token(Rule::Method)?.into();
         let operation_id = inners.expect_next_token(Rule::Identifier)?.as_str();
 
@@ -301,7 +299,7 @@ impl ApiScript {
     fn parse_response(&self, response: Node) -> Result<(HttpCode, Responses)> {
         assert!(response.as_rule() == Rule::Response);
         let mut inners = response.into_inner();
-
+        let _ = inners.expect_next_token(Rule::Annotations)?;
         let http_code: u16 = inners.expect_next_token(Rule::HttpCode)?.as_str().parse()?;
         let type_def =
             self.parse_type_definition(inners.expect_next_token(Rule::TypeDefinition)?)?;
@@ -335,14 +333,12 @@ impl ApiScript {
 
     fn parse_type_definition(&self, mut node: Node) -> Result<ReferenceOr<Schema, Definition>> {
         assert!(node.as_rule() == Rule::TypeDefinition);
-        println!("{:#?}", node);
         node = node.into_inner().next().unwrap();
         let definition = if let Rule::Identifier = node.as_rule() {
             let identifier = node.as_str();
             let schema = self.find_schema(identifier)?;
             ReferenceOr::Reference(schema)
         } else {
-            print!("{:#?}", node);
             let definition = self.parse_definition(node)?;
             ReferenceOr::Actual(definition)
         };
