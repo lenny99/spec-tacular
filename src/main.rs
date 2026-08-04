@@ -20,6 +20,7 @@ extern crate pest_derive;
 #[macro_use]
 extern crate derive_getters;
 
+mod ast;
 mod error;
 mod generator;
 mod parser;
