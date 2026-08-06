@@ -126,7 +126,7 @@ fn parse_parameter(api: &Document, parameter: Node) -> Result<ast::Parameter> {
     let mut iter = parameter.into_inner();
     let annotations = parse_parameter_annotations(iter.expect_next_token(Rule::Annotations)?)?;
     let identifier = iter.expect_next_token(Rule::Identifier)?;
-    let mut kind = parse_type_definition(api, iter.expect_next_token(Rule::TypeDefinition)?)?;
+    let kind = parse_type_definition(api, iter.expect_next_token(Rule::TypeDefinition)?)?;
     // TODO apply annotations at type creaton? create new types when existing types are
     // referenced with annotations?
     // TODO kind.constrained_by(&annotations);
@@ -190,7 +190,7 @@ fn parse_type_definition(
     return Ok(definition);
 }
 
-fn parse_definition(doc: &ast::Document, mut node: Node) -> Result<ast::Definition> {
+fn parse_definition(doc: &ast::Document, node: Node) -> Result<ast::Definition> {
     let definition = match node.as_rule() {
         Rule::List => {
             // TODO allow declaring types in lists?
@@ -219,7 +219,7 @@ fn parse_primitive(api: &Document, node: Node) -> Result<ast::Primitive> {
     let kind = parse_primitive_kind(tokens.expect_next_token(Rule::Primitive)?)?;
     let format = if let Some(token) = tokens.next() {
         assert!(token.as_rule() == Rule::Format);
-        Some(parse_format(token))
+        Some(parse_format(token)?)
     } else {
         None
     };
@@ -251,16 +251,30 @@ fn parse_fields(api: &Document, nodes: Nodes) -> Result<Vec<ast::Field>> {
     return Ok(fields);
 }
 
-fn parse_format(format: Node) -> ast::Format {
+fn parse_format(format: Node) -> Result<ast::Format> {
     assert!(format.as_rule() == Rule::Format);
-    match format.as_str() {
-        "date" => ast::Format::Date,
-        "date-time" => ast::Format::DateTime,
-        "password" => ast::Format::Password,
-        "byte" => ast::Format::Byte,
-        "binary" => ast::Format::Binary,
-        _ => ast::Format::Custom(format.as_str().to_owned()),
-    }
+    let parsed = match format.as_str() {
+        "date" => ast::Format::String(ast::StringFormat::Date),
+        "date-time" => ast::Format::String(ast::StringFormat::DateTime),
+        "password" => ast::Format::String(ast::StringFormat::Password),
+        "byte" => ast::Format::String(ast::StringFormat::Byte),
+        "binary" => ast::Format::String(ast::StringFormat::Binary),
+        "email" => ast::Format::String(ast::StringFormat::Email),
+        "uuid" => ast::Format::String(ast::StringFormat::Uuid),
+        "uri" => ast::Format::String(ast::StringFormat::Uri),
+        "hostname" => ast::Format::String(ast::StringFormat::Hostname),
+        "ipv4" => ast::Format::String(ast::StringFormat::Ipv4),
+        "ipv6" => ast::Format::String(ast::StringFormat::Ipv6),
+        "int32" => ast::Format::Integer(ast::IntegerFormat::Int32),
+        "int64" => ast::Format::Integer(ast::IntegerFormat::Int64),
+        "float" => ast::Format::Number(ast::NumberFormat::Float),
+        "double" => ast::Format::Number(ast::NumberFormat::Double),
+        other if other.starts_with("x-") => {
+            ast::Format::String(ast::StringFormat::Custom(other.to_string()))
+        }
+        _ => anyhow::bail!("unsupported format: {format}"),
+    };
+    return Ok(parsed);
 }
 
 fn parse_primitive_kind(node: Node) -> Result<ast::Kind> {

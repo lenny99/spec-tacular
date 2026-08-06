@@ -1,0 +1,62 @@
+---
+source: src/generator.rs
+expression: doc
+---
+[
+  {
+    "openapi": "",
+    "info": {
+      "title": "",
+      "version": ""
+    },
+    "paths": {},
+    "components": {
+      "schemas": {
+        "Warehouse": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "code": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "address": {
+              "type": "object",
+              "properties": {
+                "line1": {
+                  "type": "string"
+                },
+                "line2": {
+                  "type": "string"
+                },
+                "city": {
+                  "type": "string"
+                },
+                "region": {
+                  "type": "string"
+                },
+                "postalCode": {
+                  "type": "string"
+                },
+                "country": {
+                  "type": "string"
+                }
+              }
+            },
+            "capacity": {
+              "type": "integer",
+              "format": "int32"
+            },
+            "active": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    }
+  }
+]

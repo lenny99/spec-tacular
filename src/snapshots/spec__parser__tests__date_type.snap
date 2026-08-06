@@ -1,6 +1,5 @@
 ---
 source: src/parser.rs
-assertion_line: 342
 expression: document
 ---
 Document {
@@ -12,7 +11,9 @@ Document {
                     Primitive {
                         kind: String,
                         format: Some(
-                            Date,
+                            String(
+                                Date,
+                            ),
                         ),
                         constraints: [],
                     },

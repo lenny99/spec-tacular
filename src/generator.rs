@@ -1,5 +1,5 @@
 use crate::{
-    ast::{self, Path, API},
+    ast::{self, API},
     util::ReferenceOr,
 };
 use indexmap::{indexmap, IndexMap};
@@ -266,14 +266,35 @@ type BoxedSchemaReference = openapiv3::ReferenceOr<Box<openapiv3::Schema>>;
 
 impl Into<openapiv3::SchemaKind> for &ast::Primitive {
     fn into(self) -> openapiv3::SchemaKind {
-        let mut kind = match self.kind() {
-            ast::Kind::String => openapiv3::Type::String(openapiv3::StringType {
-                format: format_or_else(self),
+        let mut kind = match (self.kind(), self.format()) {
+            (ast::Kind::String, Some(ast::Format::String(sf))) => {
+                let format = openapiv3::VariantOrUnknownOrEmpty::Item(string_format(sf));
+                openapiv3::Type::String(openapiv3::StringType {
+                    format,
+                    ..Default::default()
+                })
+            }
+            (ast::Kind::String, _) => openapiv3::Type::String(openapiv3::StringType {
+                format: openapiv3::VariantOrUnknownOrEmpty::Empty,
                 ..Default::default()
             }),
-            ast::Kind::Number => openapiv3::Type::Number(openapiv3::NumberType::default()),
-            ast::Kind::Integer => openapiv3::Type::Integer(openapiv3::IntegerType::default()),
-            ast::Kind::Boolean => openapiv3::Type::Boolean {},
+            (ast::Kind::Number, Some(ast::Format::Number(nf))) => {
+                let format = openapiv3::VariantOrUnknownOrEmpty::Item(number_format(nf));
+                openapiv3::Type::Number(openapiv3::NumberType {
+                    format,
+                    ..Default::default()
+                })
+            }
+            (ast::Kind::Number, _) => openapiv3::Type::Number(openapiv3::NumberType::default()),
+            (ast::Kind::Integer, Some(ast::Format::Integer(inf))) => {
+                let format = openapiv3::VariantOrUnknownOrEmpty::Item(integer_format(inf));
+                openapiv3::Type::Integer(openapiv3::IntegerType {
+                    format,
+                    ..Default::default()
+                })
+            }
+            (ast::Kind::Integer, _) => openapiv3::Type::Integer(openapiv3::IntegerType::default()),
+            (ast::Kind::Boolean, _) => openapiv3::Type::Boolean(openapiv3::BooleanType::default()),
         };
 
         apply_constraint(&mut kind, self.constraints().as_slice());
@@ -282,13 +303,31 @@ impl Into<openapiv3::SchemaKind> for &ast::Primitive {
     }
 }
 
-fn format_or_else(
-    basic: &ast::Primitive,
-) -> openapiv3::VariantOrUnknownOrEmpty<openapiv3::StringFormat> {
-    if let Some(format) = basic.format() {
-        return openapiv3::VariantOrUnknownOrEmpty::Item(format.into());
+fn string_format(sf: &ast::StringFormat) -> openapiv3::StringFormat {
+    match sf {
+        ast::StringFormat::Date => openapiv3::StringFormat::Date,
+        ast::StringFormat::DateTime => openapiv3::StringFormat::DateTime,
+        ast::StringFormat::Password => openapiv3::StringFormat::Password,
+        ast::StringFormat::Byte => openapiv3::StringFormat::Byte,
+        ast::StringFormat::Binary => openapiv3::StringFormat::Binary,
+        ast::StringFormat::Uuid => todo!("openapiv3 cannot handle uuid"),
+        ast::StringFormat::Custom(_) => todo!("openapiv3 cannot handle custom formats"),
+        other => panic!("unsupported string format: {:?}", other),
     }
-    return openapiv3::VariantOrUnknownOrEmpty::Empty;
+}
+
+fn integer_format(inf: &ast::IntegerFormat) -> openapiv3::IntegerFormat {
+    match inf {
+        ast::IntegerFormat::Int32 => openapiv3::IntegerFormat::Int32,
+        ast::IntegerFormat::Int64 => openapiv3::IntegerFormat::Int64,
+    }
+}
+
+fn number_format(nf: &ast::NumberFormat) -> openapiv3::NumberFormat {
+    match nf {
+        ast::NumberFormat::Float => openapiv3::NumberFormat::Float,
+        ast::NumberFormat::Double => openapiv3::NumberFormat::Double,
+    }
 }
 
 fn apply_constraint(kind: &mut openapiv3::Type, constraints: &[ast::Constraint]) {
@@ -306,19 +345,6 @@ fn set_max(kind: &mut openapiv3::Type, max: usize) {
         openapiv3::Type::Number(num) => num.maximum = Some(max as f64),
         openapiv3::Type::Integer(int) => int.maximum = Some(max as i64),
         _ => (),
-    }
-}
-
-impl Into<openapiv3::StringFormat> for &ast::Format {
-    fn into(self) -> openapiv3::StringFormat {
-        match self {
-            ast::Format::Date => openapiv3::StringFormat::Date,
-            ast::Format::DateTime => openapiv3::StringFormat::DateTime,
-            ast::Format::Password => openapiv3::StringFormat::Password,
-            ast::Format::Byte => openapiv3::StringFormat::Byte,
-            ast::Format::Binary => openapiv3::StringFormat::Binary,
-            ast::Format::Custom(_) => todo!(),
-        }
     }
 }
 
@@ -346,4 +372,54 @@ fn parameter_data<Str: Into<String>>(
         extensions: indexmap! {},
         description: None,
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use insta::{assert_debug_snapshot, assert_json_snapshot};
+    use crate::ast::{testing::*, Format, IntegerFormat};
+
+    fn snapshot(name: &str, doc: DocumentBuilder) {
+        let doc = super::generate(&doc.build());
+        assert_json_snapshot!(name, doc);
+    }
+
+    #[test]
+    fn generate_kind_order_id() {
+        let mut doc = DocumentBuilder::new();
+        doc.api("api", "0.0.1");
+        doc.kind("OrderId").definition(number().max(10)).register();
+        snapshot("generate_kind_order_id", doc);
+    }
+
+    #[test]
+    fn generate_warehouse_schema() {
+        let mut doc = DocumentBuilder::new();
+        doc.api("api", "0.0.1");
+
+        let mut warehouse = doc.schema("Warehouse");
+        warehouse.field("id", |id| id.definition(string())); // .format("uuid")
+        warehouse.field("code", |definition| definition.definition(string()));
+        warehouse.field("name", |name| name.definition(string()));
+        warehouse.field("address", |address| {
+            address.schema(|obj| {
+                obj.field("line1", |line1| line1.definition(string()));
+                obj.field("line2", |line2| line2.definition(string()).required(false));
+                obj.field("city", |city| city.definition(string()));
+                obj.field("region", |region| region.definition(string()));
+                obj.field("postalCode", |postal_code| postal_code.definition(string()));
+                obj.field("country", |country| {
+                    country.definition(string()) // .custom("iso-3166")
+                });
+            })
+        });
+        warehouse.field("capacity", |capacity| {
+            capacity.definition(integer().format(Format::Integer(IntegerFormat::Int32)))
+        });
+        warehouse.field("active", |active| active.definition(bool()));
+
+        doc.register_schema(warehouse);
+
+        snapshot("generate_warehouse_schema", doc);
+    }
 }

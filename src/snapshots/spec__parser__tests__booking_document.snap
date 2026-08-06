@@ -81,7 +81,9 @@ Document {
                                     Primitive {
                                         kind: String,
                                         format: Some(
-                                            Date,
+                                            String(
+                                                Date,
+                                            ),
                                         ),
                                         constraints: [],
                                     },
@@ -366,7 +368,9 @@ Document {
                                                                     Primitive {
                                                                         kind: String,
                                                                         format: Some(
-                                                                            Date,
+                                                                            String(
+                                                                                Date,
+                                                                            ),
                                                                         ),
                                                                         constraints: [],
                                                                     },

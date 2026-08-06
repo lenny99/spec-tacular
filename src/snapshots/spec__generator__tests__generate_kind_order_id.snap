@@ -1,0 +1,22 @@
+---
+source: src/generator.rs
+expression: doc
+---
+[
+  {
+    "openapi": "",
+    "info": {
+      "title": "",
+      "version": ""
+    },
+    "paths": {},
+    "components": {
+      "schemas": {
+        "OrderId": {
+          "type": "number",
+          "maximum": 10.0
+        }
+      }
+    }
+  }
+]
