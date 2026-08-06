@@ -1,5 +1,5 @@
 
-type Date: string#date
+
 
 type ContainerId: string
 

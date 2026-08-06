@@ -178,10 +178,12 @@ fn parse_type_definition(
     assert!(node.as_rule() == Rule::TypeDefinition);
     node = node.into_inner().next().unwrap();
     let definition = if let Rule::Identifier = node.as_rule() {
+        dbg!("identifier: {:?}", &node);
         let identifier = node.as_str();
         let schema = find_schema(doc, identifier)?;
         ReferenceOr::Reference(schema)
     } else {
+        dbg!("definition: {:?}", &node);
         let definition = parse_definition(doc, node)?;
         ReferenceOr::Actual(definition)
     };
@@ -214,10 +216,10 @@ fn parse_definition(doc: &ast::Document, mut node: Node) -> Result<ast::Definiti
 
 fn parse_primitive(api: &Document, node: Node) -> Result<ast::Primitive> {
     let mut tokens = node.into_inner();
-    let kind = parse_kind(tokens.expect_next_token(Rule::Primitive)?)?;
+    let kind = parse_primitive_kind(tokens.expect_next_token(Rule::Primitive)?)?;
     let format = if let Some(token) = tokens.next() {
         assert!(token.as_rule() == Rule::Format);
-        Some(format(token))
+        Some(parse_format(token))
     } else {
         None
     };
@@ -249,7 +251,7 @@ fn parse_fields(api: &Document, nodes: Nodes) -> Result<Vec<ast::Field>> {
     return Ok(fields);
 }
 
-fn format(format: Node) -> ast::Format {
+fn parse_format(format: Node) -> ast::Format {
     assert!(format.as_rule() == Rule::Format);
     match format.as_str() {
         "date" => ast::Format::Date,
@@ -261,8 +263,12 @@ fn format(format: Node) -> ast::Format {
     }
 }
 
-fn parse_kind(node: Node) -> Result<ast::Kind> {
-    assert!(node.as_rule() == Rule::Kind);
+fn parse_primitive_kind(node: Node) -> Result<ast::Kind> {
+    assert!(
+        node.as_rule() == Rule::Primitive,
+        "node was a {}",
+        node.as_rule()
+    );
     match node.as_str() {
         "string" => Ok(ast::Kind::String),
         "number" => Ok(ast::Kind::Number),
@@ -309,4 +315,91 @@ fn parse_parameter_annotations(annotations: Node) -> Result<ast::ParameterAnnota
 
     let location = parameter_type.unwrap_or(ast::ParameterLocation::Query);
     return Ok(ast::ParameterAnnotations::new(location, constraints));
+}
+
+#[cfg(test)]
+mod tests {
+    use insta::{assert_debug_snapshot, assert_snapshot};
+
+    use super::*;
+
+    #[test]
+    fn empty_file() {
+        let src = "";
+        let Ok(document) = super::parse(src) else {
+            panic!("failed")
+        };
+        assert!(document.apis.is_empty());
+        assert!(document.schemas.is_empty());
+    }
+
+    #[inline]
+    fn snapshot(name: &str, src: &str) {
+        match super::parse(src) {
+            Ok(document) => assert_debug_snapshot!(name, document),
+            Err(error) => panic!("failed to parse: {}", error),
+        }
+    }
+
+    #[test]
+    fn date_type() {
+        snapshot("date_type", "type Date: string#date");
+    }
+
+    #[test]
+    fn container_schema() {
+        snapshot(
+            "container_schema",
+            "
+            type ContainerId: string
+
+            schema Container {
+              id: ContainerId
+              tare: integer?
+              gross: integer?
+            }
+            ",
+        );
+    }
+
+    #[test]
+    fn booking_document() {
+        snapshot(
+            "booking_document",
+            "
+            type ContainerId: string
+
+            schema Container {
+              id: ContainerId
+              tare: integer?
+              gross: integer?
+            }
+
+            schema Booking {
+              delivery: string#date
+              address: string
+              containers: [Container]
+            }
+
+            schema Problem {
+              description: string
+            }
+
+            api \"container-api\" \"0.0.1\" {
+              path \"/containers\" {
+                GET listContainers(@Query @Max(100) limit: integer) {
+                  200: Container
+                  401: Problem
+                }
+              }
+              path \"/booking/{id}\" {
+                GET getBooking(@Path id: string) {
+                  200: Booking
+                  401: Problem
+                }
+              }
+            }
+            ",
+        );
+    }
 }

@@ -1,4 +1,8 @@
-use std::{error::Error, fmt::Display, rc::Rc};
+use std::{
+    error::Error,
+    fmt::{Debug, Display},
+    rc::Rc,
+};
 
 use crate::parser::Rule;
 use pest::{

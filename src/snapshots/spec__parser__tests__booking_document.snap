@@ -1,0 +1,498 @@
+---
+source: src/parser.rs
+expression: document
+---
+Document {
+    schemas: [
+        Schema {
+            identifier: "ContainerId",
+            definition: Actual(
+                Primitive(
+                    Primitive {
+                        kind: String,
+                        format: None,
+                        constraints: [],
+                    },
+                ),
+            ),
+        },
+        Schema {
+            identifier: "Container",
+            definition: Actual(
+                Object(
+                    [
+                        Field {
+                            name: "id",
+                            definition: Reference(
+                                Schema {
+                                    identifier: "ContainerId",
+                                    definition: Actual(
+                                        Primitive(
+                                            Primitive {
+                                                kind: String,
+                                                format: None,
+                                                constraints: [],
+                                            },
+                                        ),
+                                    ),
+                                },
+                            ),
+                            required: true,
+                        },
+                        Field {
+                            name: "tare",
+                            definition: Actual(
+                                Primitive(
+                                    Primitive {
+                                        kind: Integer,
+                                        format: None,
+                                        constraints: [],
+                                    },
+                                ),
+                            ),
+                            required: false,
+                        },
+                        Field {
+                            name: "gross",
+                            definition: Actual(
+                                Primitive(
+                                    Primitive {
+                                        kind: Integer,
+                                        format: None,
+                                        constraints: [],
+                                    },
+                                ),
+                            ),
+                            required: false,
+                        },
+                    ],
+                ),
+            ),
+        },
+        Schema {
+            identifier: "Booking",
+            definition: Actual(
+                Object(
+                    [
+                        Field {
+                            name: "delivery",
+                            definition: Actual(
+                                Primitive(
+                                    Primitive {
+                                        kind: String,
+                                        format: Some(
+                                            Date,
+                                        ),
+                                        constraints: [],
+                                    },
+                                ),
+                            ),
+                            required: true,
+                        },
+                        Field {
+                            name: "address",
+                            definition: Actual(
+                                Primitive(
+                                    Primitive {
+                                        kind: String,
+                                        format: None,
+                                        constraints: [],
+                                    },
+                                ),
+                            ),
+                            required: true,
+                        },
+                        Field {
+                            name: "containers",
+                            definition: Actual(
+                                Array(
+                                    Schema {
+                                        identifier: "Container",
+                                        definition: Actual(
+                                            Object(
+                                                [
+                                                    Field {
+                                                        name: "id",
+                                                        definition: Reference(
+                                                            Schema {
+                                                                identifier: "ContainerId",
+                                                                definition: Actual(
+                                                                    Primitive(
+                                                                        Primitive {
+                                                                            kind: String,
+                                                                            format: None,
+                                                                            constraints: [],
+                                                                        },
+                                                                    ),
+                                                                ),
+                                                            },
+                                                        ),
+                                                        required: true,
+                                                    },
+                                                    Field {
+                                                        name: "tare",
+                                                        definition: Actual(
+                                                            Primitive(
+                                                                Primitive {
+                                                                    kind: Integer,
+                                                                    format: None,
+                                                                    constraints: [],
+                                                                },
+                                                            ),
+                                                        ),
+                                                        required: false,
+                                                    },
+                                                    Field {
+                                                        name: "gross",
+                                                        definition: Actual(
+                                                            Primitive(
+                                                                Primitive {
+                                                                    kind: Integer,
+                                                                    format: None,
+                                                                    constraints: [],
+                                                                },
+                                                            ),
+                                                        ),
+                                                        required: false,
+                                                    },
+                                                ],
+                                            ),
+                                        ),
+                                    },
+                                ),
+                            ),
+                            required: true,
+                        },
+                    ],
+                ),
+            ),
+        },
+        Schema {
+            identifier: "Problem",
+            definition: Actual(
+                Object(
+                    [
+                        Field {
+                            name: "description",
+                            definition: Actual(
+                                Primitive(
+                                    Primitive {
+                                        kind: String,
+                                        format: None,
+                                        constraints: [],
+                                    },
+                                ),
+                            ),
+                            required: true,
+                        },
+                    ],
+                ),
+            ),
+        },
+    ],
+    apis: [
+        API {
+            name: "\"container-api\"",
+            version: "\"0.0.1\"",
+            paths: {
+                "/containers": Path {
+                    endpoints: {
+                        Get: Endpoint {
+                            operation_id: "listContainers",
+                            parameters: [
+                                Parameter {
+                                    name: "limit",
+                                    kind: Actual(
+                                        Primitive(
+                                            Primitive {
+                                                kind: Integer,
+                                                format: None,
+                                                constraints: [],
+                                            },
+                                        ),
+                                    ),
+                                    location: Query,
+                                    constraints: [
+                                        Maximum(
+                                            100,
+                                        ),
+                                    ],
+                                },
+                            ],
+                            responses: {
+                                200: {
+                                    MediaTypeBuf {
+                                        data: "application/json",
+                                        indices: Indices {
+                                            ty: 11,
+                                            subty: 4,
+                                            suffix: 0,
+                                            params: [],
+                                        },
+                                    }: Reference(
+                                        Schema {
+                                            identifier: "Container",
+                                            definition: Actual(
+                                                Object(
+                                                    [
+                                                        Field {
+                                                            name: "id",
+                                                            definition: Reference(
+                                                                Schema {
+                                                                    identifier: "ContainerId",
+                                                                    definition: Actual(
+                                                                        Primitive(
+                                                                            Primitive {
+                                                                                kind: String,
+                                                                                format: None,
+                                                                                constraints: [],
+                                                                            },
+                                                                        ),
+                                                                    ),
+                                                                },
+                                                            ),
+                                                            required: true,
+                                                        },
+                                                        Field {
+                                                            name: "tare",
+                                                            definition: Actual(
+                                                                Primitive(
+                                                                    Primitive {
+                                                                        kind: Integer,
+                                                                        format: None,
+                                                                        constraints: [],
+                                                                    },
+                                                                ),
+                                                            ),
+                                                            required: false,
+                                                        },
+                                                        Field {
+                                                            name: "gross",
+                                                            definition: Actual(
+                                                                Primitive(
+                                                                    Primitive {
+                                                                        kind: Integer,
+                                                                        format: None,
+                                                                        constraints: [],
+                                                                    },
+                                                                ),
+                                                            ),
+                                                            required: false,
+                                                        },
+                                                    ],
+                                                ),
+                                            ),
+                                        },
+                                    ),
+                                },
+                                401: {
+                                    MediaTypeBuf {
+                                        data: "application/json",
+                                        indices: Indices {
+                                            ty: 11,
+                                            subty: 4,
+                                            suffix: 0,
+                                            params: [],
+                                        },
+                                    }: Reference(
+                                        Schema {
+                                            identifier: "Problem",
+                                            definition: Actual(
+                                                Object(
+                                                    [
+                                                        Field {
+                                                            name: "description",
+                                                            definition: Actual(
+                                                                Primitive(
+                                                                    Primitive {
+                                                                        kind: String,
+                                                                        format: None,
+                                                                        constraints: [],
+                                                                    },
+                                                                ),
+                                                            ),
+                                                            required: true,
+                                                        },
+                                                    ],
+                                                ),
+                                            ),
+                                        },
+                                    ),
+                                },
+                            },
+                        },
+                    },
+                },
+                "/booking/{id}": Path {
+                    endpoints: {
+                        Get: Endpoint {
+                            operation_id: "getBooking",
+                            parameters: [
+                                Parameter {
+                                    name: "id",
+                                    kind: Actual(
+                                        Primitive(
+                                            Primitive {
+                                                kind: String,
+                                                format: None,
+                                                constraints: [],
+                                            },
+                                        ),
+                                    ),
+                                    location: Path,
+                                    constraints: [],
+                                },
+                            ],
+                            responses: {
+                                200: {
+                                    MediaTypeBuf {
+                                        data: "application/json",
+                                        indices: Indices {
+                                            ty: 11,
+                                            subty: 4,
+                                            suffix: 0,
+                                            params: [],
+                                        },
+                                    }: Reference(
+                                        Schema {
+                                            identifier: "Booking",
+                                            definition: Actual(
+                                                Object(
+                                                    [
+                                                        Field {
+                                                            name: "delivery",
+                                                            definition: Actual(
+                                                                Primitive(
+                                                                    Primitive {
+                                                                        kind: String,
+                                                                        format: Some(
+                                                                            Date,
+                                                                        ),
+                                                                        constraints: [],
+                                                                    },
+                                                                ),
+                                                            ),
+                                                            required: true,
+                                                        },
+                                                        Field {
+                                                            name: "address",
+                                                            definition: Actual(
+                                                                Primitive(
+                                                                    Primitive {
+                                                                        kind: String,
+                                                                        format: None,
+                                                                        constraints: [],
+                                                                    },
+                                                                ),
+                                                            ),
+                                                            required: true,
+                                                        },
+                                                        Field {
+                                                            name: "containers",
+                                                            definition: Actual(
+                                                                Array(
+                                                                    Schema {
+                                                                        identifier: "Container",
+                                                                        definition: Actual(
+                                                                            Object(
+                                                                                [
+                                                                                    Field {
+                                                                                        name: "id",
+                                                                                        definition: Reference(
+                                                                                            Schema {
+                                                                                                identifier: "ContainerId",
+                                                                                                definition: Actual(
+                                                                                                    Primitive(
+                                                                                                        Primitive {
+                                                                                                            kind: String,
+                                                                                                            format: None,
+                                                                                                            constraints: [],
+                                                                                                        },
+                                                                                                    ),
+                                                                                                ),
+                                                                                            },
+                                                                                        ),
+                                                                                        required: true,
+                                                                                    },
+                                                                                    Field {
+                                                                                        name: "tare",
+                                                                                        definition: Actual(
+                                                                                            Primitive(
+                                                                                                Primitive {
+                                                                                                    kind: Integer,
+                                                                                                    format: None,
+                                                                                                    constraints: [],
+                                                                                                },
+                                                                                            ),
+                                                                                        ),
+                                                                                        required: false,
+                                                                                    },
+                                                                                    Field {
+                                                                                        name: "gross",
+                                                                                        definition: Actual(
+                                                                                            Primitive(
+                                                                                                Primitive {
+                                                                                                    kind: Integer,
+                                                                                                    format: None,
+                                                                                                    constraints: [],
+                                                                                                },
+                                                                                            ),
+                                                                                        ),
+                                                                                        required: false,
+                                                                                    },
+                                                                                ],
+                                                                            ),
+                                                                        ),
+                                                                    },
+                                                                ),
+                                                            ),
+                                                            required: true,
+                                                        },
+                                                    ],
+                                                ),
+                                            ),
+                                        },
+                                    ),
+                                },
+                                401: {
+                                    MediaTypeBuf {
+                                        data: "application/json",
+                                        indices: Indices {
+                                            ty: 11,
+                                            subty: 4,
+                                            suffix: 0,
+                                            params: [],
+                                        },
+                                    }: Reference(
+                                        Schema {
+                                            identifier: "Problem",
+                                            definition: Actual(
+                                                Object(
+                                                    [
+                                                        Field {
+                                                            name: "description",
+                                                            definition: Actual(
+                                                                Primitive(
+                                                                    Primitive {
+                                                                        kind: String,
+                                                                        format: None,
+                                                                        constraints: [],
+                                                                    },
+                                                                ),
+                                                            ),
+                                                            required: true,
+                                                        },
+                                                    ],
+                                                ),
+                                            ),
+                                        },
+                                    ),
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        },
+    ],
+}

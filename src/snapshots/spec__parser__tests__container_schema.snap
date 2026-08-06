@@ -1,0 +1,74 @@
+---
+source: src/parser.rs
+expression: document
+---
+Document {
+    schemas: [
+        Schema {
+            identifier: "ContainerId",
+            definition: Actual(
+                Primitive(
+                    Primitive {
+                        kind: String,
+                        format: None,
+                        constraints: [],
+                    },
+                ),
+            ),
+        },
+        Schema {
+            identifier: "Container",
+            definition: Actual(
+                Object(
+                    [
+                        Field {
+                            name: "id",
+                            definition: Reference(
+                                Schema {
+                                    identifier: "ContainerId",
+                                    definition: Actual(
+                                        Primitive(
+                                            Primitive {
+                                                kind: String,
+                                                format: None,
+                                                constraints: [],
+                                            },
+                                        ),
+                                    ),
+                                },
+                            ),
+                            required: true,
+                        },
+                        Field {
+                            name: "tare",
+                            definition: Actual(
+                                Primitive(
+                                    Primitive {
+                                        kind: Integer,
+                                        format: None,
+                                        constraints: [],
+                                    },
+                                ),
+                            ),
+                            required: false,
+                        },
+                        Field {
+                            name: "gross",
+                            definition: Actual(
+                                Primitive(
+                                    Primitive {
+                                        kind: Integer,
+                                        format: None,
+                                        constraints: [],
+                                    },
+                                ),
+                            ),
+                            required: false,
+                        },
+                    ],
+                ),
+            ),
+        },
+    ],
+    apis: [],
+}

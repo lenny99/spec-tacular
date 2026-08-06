@@ -1,0 +1,24 @@
+---
+source: src/parser.rs
+assertion_line: 342
+expression: document
+---
+Document {
+    schemas: [
+        Schema {
+            identifier: "Date",
+            definition: Actual(
+                Primitive(
+                    Primitive {
+                        kind: String,
+                        format: Some(
+                            Date,
+                        ),
+                        constraints: [],
+                    },
+                ),
+            ),
+        },
+    ],
+    apis: [],
+}

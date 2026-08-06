@@ -1,6 +1,7 @@
 use anyhow::Result;
 use indexmap::IndexMap;
 use mediatype::MediaTypeBuf;
+use std::fmt::Display;
 
 use crate::util::ReferenceOr;
 use std::rc::Rc;
