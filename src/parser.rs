@@ -1,4 +1,4 @@
-use anyhow::{bail, Result};
+use anyhow::{anyhow, bail, Result};
 use indexmap::{indexmap, IndexMap};
 use itertools::Itertools;
 use mediatype::{
@@ -6,7 +6,7 @@ use mediatype::{
     MediaTypeBuf,
 };
 use pest::Parser;
-use std::rc::Rc;
+use std::{cell::OnceCell, iter::Once, ops::Deref, rc::Rc};
 
 use crate::{
     ast::{self, Document},
@@ -201,7 +201,7 @@ fn parse_definition(doc: &ast::Document, node: Node) -> Result<ast::Definition> 
             ast::Definition::Array(schema)
         }
         Rule::Kind => {
-            let primitive = parse_primitive(doc, node)?;
+            let primitive = parse_primitive(node)?;
             ast::Definition::Primitive(primitive)
         }
         //Rule::Identifier => return self.parse_reference_or_definition(node),
@@ -212,7 +212,7 @@ fn parse_definition(doc: &ast::Document, node: Node) -> Result<ast::Definition> 
     return Ok(definition);
 }
 
-fn parse_primitive(api: &Document, node: Node) -> Result<ast::Primitive> {
+fn parse_primitive(node: Node) -> Result<ast::Primitive> {
     let mut tokens = node.into_inner();
     let kind = parse_primitive_kind(tokens.expect_next_token(Rule::Primitive)?)?;
     let format = if let Some(token) = tokens.next() {
@@ -305,15 +305,22 @@ impl<'a> Into<ast::HttpMethod> for Node<'a> {
 }
 
 fn parse_parameter_annotations(annotations: Node) -> Result<ast::ParameterAnnotations> {
-    let mut parameter_type = None;
+    let parameter_type = OnceCell::<ast::ParameterLocation>::new();
+    let set_type = |kind: ast::ParameterLocation| {
+        parameter_type
+            .set(kind)
+            .map_err(|_| anyhow!("cannot assign multiple types to parameter."))
+    };
     let mut constraints = vec![];
 
     for annotation in annotations.into_inner() {
         let mut tokens = annotation.into_inner();
         let identifier = tokens.expect_next_token(Rule::Identifier)?;
         match identifier.as_str() {
-            "Path" => parameter_type = Some(ast::ParameterLocation::Path),
-            "Query" => parameter_type = Some(ast::ParameterLocation::Query),
+            "Path" => set_type(ast::ParameterLocation::Path)?,
+            "Query" => set_type(ast::ParameterLocation::Query)?,
+            "Header" => set_type(ast::ParameterLocation::Header)?,
+            "Cookie" => set_type(ast::ParameterLocation::Cookie)?,
             "Max" => {
                 let max = tokens
                     .expect_next_token(Rule::NumberValue)?
@@ -321,19 +328,19 @@ fn parse_parameter_annotations(annotations: Node) -> Result<ast::ParameterAnnota
                     .parse()?;
                 constraints.push(ast::Constraint::Maximum(max));
             }
-            _ => (),
+            _ => anyhow::bail!("unknown annotation '{}'", identifier.as_str()),
         }
     }
 
-    let location = parameter_type.unwrap_or(ast::ParameterLocation::Query);
+    let location = parameter_type
+        .into_inner()
+        .unwrap_or_else(|| ast::ParameterLocation::Query);
     return Ok(ast::ParameterAnnotations::new(location, constraints));
 }
 
 #[cfg(test)]
 mod tests {
-    use insta::{assert_debug_snapshot, assert_snapshot};
-
-    use super::*;
+    use insta::assert_debug_snapshot;
 
     #[test]
     fn empty_file() {
