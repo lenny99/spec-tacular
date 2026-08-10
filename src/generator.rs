@@ -376,8 +376,8 @@ fn parameter_data<Str: Into<String>>(
 
 #[cfg(test)]
 mod tests {
-    use insta::{assert_debug_snapshot, assert_json_snapshot};
     use crate::ast::{testing::*, Format, IntegerFormat};
+    use insta::{assert_debug_snapshot, assert_json_snapshot};
 
     fn snapshot(name: &str, doc: DocumentBuilder) {
         let doc = super::generate(&doc.build());
@@ -398,25 +398,25 @@ mod tests {
         doc.api("api", "0.0.1");
 
         let mut warehouse = doc.schema("Warehouse");
-        warehouse.field("id", |id| id.definition(string())); // .format("uuid")
-        warehouse.field("code", |definition| definition.definition(string()));
-        warehouse.field("name", |name| name.definition(string()));
+        warehouse.field("id", |id| id.is(string())); // .format("uuid")
+        warehouse.field("code", |definition| definition.is(string()));
+        warehouse.field("name", |name| name.is(string()));
         warehouse.field("address", |address| {
             address.schema(|obj| {
-                obj.field("line1", |line1| line1.definition(string()));
-                obj.field("line2", |line2| line2.definition(string()).required(false));
-                obj.field("city", |city| city.definition(string()));
-                obj.field("region", |region| region.definition(string()));
-                obj.field("postalCode", |postal_code| postal_code.definition(string()));
+                obj.field("line1", |line1| line1.is(string()));
+                obj.field("line2", |line2| line2.is(string()).required(false));
+                obj.field("city", |city| city.is(string()));
+                obj.field("region", |region| region.is(string()));
+                obj.field("postalCode", |postal_code| postal_code.is(string()));
                 obj.field("country", |country| {
-                    country.definition(string()) // .custom("iso-3166")
+                    country.is(string()) // .custom("iso-3166")
                 });
             })
         });
         warehouse.field("capacity", |capacity| {
-            capacity.definition(integer().format(Format::Integer(IntegerFormat::Int32)))
+            capacity.is(integer().format(Format::Integer(IntegerFormat::Int32)))
         });
-        warehouse.field("active", |active| active.definition(bool()));
+        warehouse.field("active", |active| active.is(bool()));
 
         doc.register_schema(warehouse);
 

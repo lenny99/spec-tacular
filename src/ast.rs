@@ -476,12 +476,12 @@ pub mod testing {
             };
         }
 
-        pub fn reference(mut self, schema: Rc<Schema>) -> FieldBuilder {
+        pub fn refer(mut self, schema: Rc<Schema>) -> FieldBuilder {
             self.kind = Some(ReferenceOr::Reference(schema));
             self
         }
 
-        pub fn definition<D: Into<Definition>>(mut self, definition: D) -> FieldBuilder {
+        pub fn is<D: Into<Definition>>(mut self, definition: D) -> FieldBuilder {
             self.kind = Some(ReferenceOr::Actual(definition.into()));
             self
         }
