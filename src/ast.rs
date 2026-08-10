@@ -367,7 +367,7 @@ pub mod testing {
             SchemaBuilder::new(name)
         }
 
-        pub fn kind(&'builder mut self, name: &str) -> KindBuilder {
+        pub fn kind(&'builder mut self, name: &str) -> KindBuilder<'builder> {
             KindBuilder::new(self, name)
         }
 

@@ -5,7 +5,7 @@ use crate::{
 use indexmap::{indexmap, IndexMap};
 use mediatype::MediaTypeBuf;
 use openapiv3::{
-    Components, Operation, ParameterData, ParameterSchemaOrContent, PathItem, QueryStyle,
+    Components, Info, Operation, ParameterData, ParameterSchemaOrContent, PathItem, QueryStyle,
     SchemaData, StatusCode,
 };
 
@@ -52,6 +52,11 @@ impl Into<ReferenceOrSchema> for &ReferenceOr<ast::Schema, ast::Definition> {
 
 fn generate_api(doc: &ast::Document, api: &ast::API) -> openapiv3::OpenAPI {
     return openapiv3::OpenAPI {
+        info: Info {
+            title: api.name().clone(),
+            version: api.version().clone(),
+            ..Default::default()
+        },
         paths: generate_api_paths(api),
         components: Option::Some(Components {
             schemas: generate_schemas(doc),
@@ -377,7 +382,7 @@ fn parameter_data<Str: Into<String>>(
 #[cfg(test)]
 mod tests {
     use crate::ast::{testing::*, Format, IntegerFormat};
-    use insta::{assert_debug_snapshot, assert_json_snapshot};
+    use insta::assert_json_snapshot;
 
     fn snapshot(name: &str, doc: DocumentBuilder) {
         let doc = super::generate(&doc.build());

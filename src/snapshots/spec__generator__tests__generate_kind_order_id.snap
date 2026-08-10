@@ -6,8 +6,8 @@ expression: doc
   {
     "openapi": "",
     "info": {
-      "title": "",
-      "version": ""
+      "title": "api",
+      "version": "0.0.1"
     },
     "paths": {},
     "components": {
