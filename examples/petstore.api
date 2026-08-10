@@ -29,12 +29,12 @@ api "Swagger Petstore" "0.0.1" {
         schema: string
         description: "A link to the next page of responses"
       })
-      200:     Pets
-      default: Error
+      200: Pets
+      401: Error
     }
-    POST createPets() {
-      201: undefined
-      default: Error
+    POST createPet(pet: Pet) {
+      201: Pet
+      401: Error
     }
   }
 
@@ -43,7 +43,7 @@ api "Swagger Petstore" "0.0.1" {
   path "/pets/{petId}" {
     GET showPetById(@Path petId: string) {
       200: Pet
-      default: Error
+      401: Error
     }
   }
 }
