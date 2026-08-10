@@ -178,12 +178,10 @@ fn parse_type_definition(
     assert!(node.as_rule() == Rule::TypeDefinition);
     node = node.into_inner().next().unwrap();
     let definition = if let Rule::Identifier = node.as_rule() {
-        dbg!("identifier: {:?}", &node);
         let identifier = node.as_str();
         let schema = find_schema(doc, identifier)?;
         ReferenceOr::Reference(schema)
     } else {
-        dbg!("definition: {:?}", &node);
         let definition = parse_definition(doc, node)?;
         ReferenceOr::Actual(definition)
     };
