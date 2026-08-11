@@ -19,7 +19,6 @@ schema Error {
 @termsOfService("https://link")
 @contact("Max Mustermann")
 @license("MIT")
-@Query({description: "How many items to return at one time"})
 api "Swagger Petstore" "0.0.1" {
 
   path "/pets" {

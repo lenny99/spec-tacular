@@ -33,9 +33,11 @@ pub enum Definition {
 }
 
 impl Definition {
-    fn constrained_by(self: &mut Self, annotations: &ParameterAnnotations) {
+    pub fn constrained_by(self: &Self, constraints: &Vec<Constraint>) -> Self {
         match self {
-            Definition::Primitive(basic) => basic.constrained_by(annotations),
+            Definition::Primitive(basic) => {
+                Definition::Primitive(basic.constrained_by(constraints))
+            }
             Definition::Array(_element) => todo!(),
             Definition::Object(_fields) => todo!(),
         }
@@ -58,14 +60,14 @@ impl Primitive {
         }
     }
 
-    fn constrained_by(self: &mut Self, annotations: &ParameterAnnotations) {
-        for constraint in &annotations.constraints {
-            self.constraints.push(constraint.clone())
-        }
+    fn constrained_by(self: &Self, constraints: &Vec<Constraint>) -> Self {
+        let mut cloned = self.clone();
+        cloned.constraints.clone_from(constraints);
+        return cloned;
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Constraint {
     Maximum(usize),
     Minimum(usize),

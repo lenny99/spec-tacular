@@ -1,13 +1,18 @@
 use crate::{
     ast::{self, API},
-    util::ReferenceOr,
+    util::{self},
 };
 use indexmap::{indexmap, IndexMap};
 use mediatype::MediaTypeBuf;
 use openapiv3::{
     Components, Info, Operation, ParameterData, ParameterSchemaOrContent, PathItem, QueryStyle,
-    SchemaData, StatusCode,
+    Schema, SchemaData, SchemaKind, StatusCode,
 };
+use std::rc::Rc;
+
+fn named_schema_path(name: &str) -> String {
+    format!("#/components/schemas/{}", name)
+}
 
 pub(crate) fn generate(doc: &ast::Document) -> Vec<openapiv3::OpenAPI> {
     let mut apis: Vec<openapiv3::OpenAPI> = vec![];
@@ -27,27 +32,6 @@ fn generate_schemas(
         map.insert(identifier, ref_or_schema);
     }
     return map;
-}
-
-type ReferenceOrSchema = openapiv3::ReferenceOr<openapiv3::Schema>;
-
-impl Into<(String, ReferenceOrSchema)> for &ast::Schema {
-    fn into(self) -> (String, ReferenceOrSchema) {
-        return (self.identifier.to_owned(), (&self.definition).into());
-    }
-}
-
-impl Into<ReferenceOrSchema> for &ReferenceOr<ast::Schema, ast::Definition> {
-    fn into(self) -> ReferenceOrSchema {
-        match self {
-            ReferenceOr::Reference(reference) => {
-                let name = &reference.as_ref().identifier;
-                let path = format!("#/components/schemas/{name}");
-                return ReferenceOrSchema::Reference { reference: path };
-            }
-            ReferenceOr::Actual(definition) => openapiv3::ReferenceOr::Item(definition.into()),
-        }
-    }
 }
 
 fn generate_api(doc: &ast::Document, api: &ast::API) -> openapiv3::OpenAPI {
@@ -107,13 +91,14 @@ fn openapi_parameters(
 
     for parameter in endpoint.parameters() {
         let name = parameter.name();
-        let kind = parameter.kind();
+        let kind = determine_kind(parameter);
+
         let parameter = match parameter.location() {
-            ast::ParameterLocation::Query => query(parameter_data(name, kind.into())),
+            ast::ParameterLocation::Query => query(parameter_data(name, kind)),
             ast::ParameterLocation::Path => openapiv3::Parameter::Path {
                 parameter_data: openapiv3::ParameterData {
                     required: true,
-                    ..parameter_data(parameter.name(), parameter.kind().into())
+                    ..parameter_data(parameter.name(), kind)
                 },
                 style: openapiv3::PathStyle::Simple,
             },
@@ -122,8 +107,93 @@ fn openapi_parameters(
         };
         result.push(openapiv3::ReferenceOr::Item(parameter));
     }
-
     return result;
+
+    fn determine_kind(parameter: &ast::Parameter) -> ParameterSchemaOrContent {
+        if parameter.constraints().is_empty() {
+            return parameter.kind().into();
+        }
+        let constraints = parameter.constraints();
+        match parameter.kind() {
+            util::ReferenceOr::Reference(referenced) => {
+                return all_of_with_constraints(referenced, constraints);
+            }
+            util::ReferenceOr::Actual(actual) => {
+                let constrained = actual.constrained_by(constraints);
+                let item = openapiv3::ReferenceOr::Item((&constrained).into());
+                return ParameterSchemaOrContent::Schema(item);
+            }
+        }
+    }
+
+    fn all_of_with_constraints(
+        schema: &Rc<ast::Schema>,
+        constraints: &[ast::Constraint],
+    ) -> ParameterSchemaOrContent {
+        let reference = openapiv3::ReferenceOr::Reference {
+            reference: named_schema_path(&schema.identifier),
+        };
+        let definition = schema.definition.resolve();
+        let constraint_type = to_constraint_type(definition, constraints);
+        let schema = Schema {
+            schema_data: SchemaData::default(),
+            schema_kind: openapiv3::SchemaKind::AllOf {
+                all_of: vec![reference, constraint_type],
+            },
+        };
+        let item = openapiv3::ReferenceOr::Item(schema);
+        return ParameterSchemaOrContent::Schema(item);
+
+        fn to_constraint_type(
+            definition: &ast::Definition,
+            constraints: &[ast::Constraint],
+        ) -> ReferenceOrSchema {
+            let minimum = constraints.iter().find_map(|c| {
+                if let ast::Constraint::Minimum(v) = c {
+                    Some(*v as i64)
+                } else {
+                    None
+                }
+            });
+            let maximum = constraints.iter().find_map(|c| {
+                if let ast::Constraint::Maximum(v) = c {
+                    Some(*v as i64)
+                } else {
+                    None
+                }
+            });
+
+            let kind = match definition {
+                ast::Definition::Primitive(primitive) => match primitive.kind() {
+                    ast::Kind::String => todo!(),
+                    ast::Kind::Number => todo!(),
+                    ast::Kind::Integer => openapiv3::Type::Integer(openapiv3::IntegerType {
+                        minimum,
+                        maximum,
+                        ..Default::default()
+                    }),
+                    ast::Kind::Boolean => todo!(),
+                },
+                ast::Definition::Array(_schema) => todo!(),
+                ast::Definition::Object(_fields) => todo!(),
+            };
+
+            let item = openapiv3::Schema {
+                schema_data: SchemaData::default(),
+                schema_kind: SchemaKind::Type(kind),
+            };
+            ReferenceOrSchema::Item(item)
+        }
+    }
+}
+
+impl util::ReferenceOr<ast::Schema, ast::Definition> {
+    fn resolve(&self) -> &ast::Definition {
+        match self {
+            util::ReferenceOr::Reference(referenced) => referenced.definition.resolve(),
+            util::ReferenceOr::Actual(actual) => actual,
+        }
+    }
 }
 
 fn openapi_responses(endpoint: &ast::Endpoint) -> openapiv3::Responses {
@@ -146,7 +216,7 @@ fn openapi_responses(endpoint: &ast::Endpoint) -> openapiv3::Responses {
 }
 
 fn to_content(
-    map: &IndexMap<MediaTypeBuf, ReferenceOr<ast::Schema, ast::Definition>>,
+    map: &IndexMap<MediaTypeBuf, util::ReferenceOr<ast::Schema, ast::Definition>>,
 ) -> IndexMap<String, openapiv3::MediaType> {
     let mut result = indexmap!();
     for (media_type, definition) in map {
@@ -162,7 +232,32 @@ fn to_content(
     return result;
 }
 
-impl Into<openapiv3::ParameterSchemaOrContent> for &ReferenceOr<ast::Schema, ast::Definition> {
+type ReferenceOrSchema = openapiv3::ReferenceOr<openapiv3::Schema>;
+
+impl Into<(String, ReferenceOrSchema)> for &ast::Schema {
+    fn into(self) -> (String, ReferenceOrSchema) {
+        return (self.identifier.to_owned(), (&self.definition).into());
+    }
+}
+
+impl Into<ReferenceOrSchema> for &util::ReferenceOr<ast::Schema, ast::Definition> {
+    fn into(self) -> ReferenceOrSchema {
+        match self {
+            util::ReferenceOr::Reference(reference) => {
+                let name = &reference.as_ref().identifier;
+                let path = format!("#/components/schemas/{name}");
+                return ReferenceOrSchema::Reference { reference: path };
+            }
+            util::ReferenceOr::Actual(definition) => {
+                openapiv3::ReferenceOr::Item(definition.into())
+            }
+        }
+    }
+}
+
+impl Into<openapiv3::ParameterSchemaOrContent>
+    for &util::ReferenceOr<ast::Schema, ast::Definition>
+{
     fn into(self) -> openapiv3::ParameterSchemaOrContent {
         let schema: ReferenceOrSchema = self.into();
         return openapiv3::ParameterSchemaOrContent::Schema(schema);
@@ -216,7 +311,7 @@ impl Into<openapiv3::Schema> for &ast::Definition {
                 )),
             },
             ast::Definition::Array(array) => {
-                let path = format!("#/components/schemas/{}", array.identifier);
+                let path = named_schema_path(&(*array.identifier));
                 let reference = BoxedSchemaReference::Reference { reference: path };
                 let array_type = openapiv3::ArrayType {
                     items: Option::Some(reference),
@@ -242,11 +337,11 @@ impl ast::Definition {
         for field in fields {
             let definition = field.definition();
             match definition {
-                ReferenceOr::Reference(_reference) => {
+                util::ReferenceOr::Reference(_reference) => {
                     //let kind = BoxedSchemaReference::Reference(reference);
                     //map.insert(field.name().to_owned(), kind);
                 }
-                ReferenceOr::Actual(definition) => {
+                util::ReferenceOr::Actual(definition) => {
                     let schema: openapiv3::Schema = definition.into();
                     map.insert(
                         field.name().to_owned(),

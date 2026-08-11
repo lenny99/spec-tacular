@@ -6,7 +6,7 @@ use mediatype::{
     MediaTypeBuf,
 };
 use pest::Parser;
-use std::{cell::OnceCell, iter::Once, ops::Deref, rc::Rc};
+use std::{cell::OnceCell, rc::Rc};
 
 use crate::{
     ast::{self, Document},
@@ -127,9 +127,6 @@ fn parse_parameter(api: &Document, parameter: Node) -> Result<ast::Parameter> {
     let annotations = parse_parameter_annotations(iter.expect_next_token(Rule::Annotations)?)?;
     let identifier = iter.expect_next_token(Rule::Identifier)?;
     let kind = parse_type_definition(api, iter.expect_next_token(Rule::TypeDefinition)?)?;
-    // TODO apply annotations at type creaton? create new types when existing types are
-    // referenced with annotations?
-    // TODO kind.constrained_by(&annotations);
     return Ok(ast::Parameter::new(
         identifier.as_str().to_string(),
         kind,
