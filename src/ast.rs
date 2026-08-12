@@ -244,8 +244,6 @@ impl ParameterAnnotations {
 
 #[cfg(test)]
 pub mod testing {
-    use std::thread::scope;
-
     use super::*;
 
     pub enum DefinitionBuilder {

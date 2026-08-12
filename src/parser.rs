@@ -63,8 +63,8 @@ fn parse_type(api: &Document, kind: Node) -> Result<ast::Schema> {
 fn parse_api(doc: &ast::Document, node: Node) -> Result<ast::API> {
     let mut nodes = node.into_inner();
     let _ = nodes.expect_next_token(Rule::Annotations)?;
-    let identifier = nodes.expect_next_token(Rule::String)?.as_str();
-    let version = nodes.expect_next_token(Rule::String)?.as_str();
+    let identifier = unqoute(nodes.expect_next_token(Rule::String)?);
+    let version = unqoute(nodes.expect_next_token(Rule::String)?);
     let path_nodes = nodes.expect_next_token(Rule::ApiBody)?;
 
     let mut paths: IndexMap<String, ast::Path> = indexmap!();
@@ -81,6 +81,11 @@ fn parse_api(doc: &ast::Document, node: Node) -> Result<ast::API> {
     }
 
     return Ok(ast::API::new(identifier.into(), version.into(), paths));
+}
+
+fn unqoute<'s>(node: Node<'s>) -> &'s str {
+    let str = node.as_str();
+    &str[1..str.len() - 1]
 }
 
 fn parse_path(doc: &ast::Document, path: Node) -> Result<(String, ast::Path)> {

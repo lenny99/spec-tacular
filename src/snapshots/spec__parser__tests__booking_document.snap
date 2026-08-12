@@ -194,8 +194,8 @@ Document {
     ],
     apis: [
         API {
-            name: "\"container-api\"",
-            version: "\"0.0.1\"",
+            name: "container-api",
+            version: "0.0.1",
             paths: {
                 "/containers": Path {
                     endpoints: {
